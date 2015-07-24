@@ -1,0 +1,2 @@
+# dialogc
+Game dialog compiler
