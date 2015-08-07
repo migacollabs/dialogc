@@ -1,0 +1,56 @@
+DOCUMENT:
+    title: MyGame
+    title_description: This is a great game
+    copyright: MyGameStudio
+
+(StoryBlockName static):
+    story_line:
+
+        - incoming: The Game says something to the player
+          time_delay: 1
+          responses:
+            - A response a Player can choose
+            - A different response a Player can choose
+
+        - incoming: The Game says something to the player a little bit later, in sequence
+          time_delay: 1
+          responses:
+            - A response a Player can choose
+            - A different response a Player can choose
+            
+(CharacterShouldSayThis static log spoken):
+    location: INT Laboratory
+    description: Character is doing something
+    entries:
+        - parenthetical: very serious
+          dialog: So my name is Character and I'm saying something!
+
+
+
+
+(DynamicConversationBlock dynamic):
+    keyed_storylines:
+
+        player_did_this:
+
+            response: Player says this
+            player_data_threshold: ">0"
+            time_delay_secs: 5
+            dynamic_storyline:
+                - time_delay_secs: 5
+                  incoming: A response to the player
+                  responses:
+                    - Player has this option with which to respone.
+                    - Or maybe the player wants to respond with this option instead.
+
+        then_the_player_did_this:
+
+            response: Player says this
+            player_data_threshold: ">0"
+            time_delay_secs: 5
+            dynamic_storyline:
+                - time_delay_secs: 5
+                  incoming: A response to the player
+                  responses:
+                    - Player has this option with which to respone.
+                    - Or maybe the player wants to respond with this option instead.
