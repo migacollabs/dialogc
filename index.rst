@@ -6,7 +6,7 @@
 Welcome to DialogC
 ==================
 
-DialogC is a Game Dialog Markup and Compilation tool. From a single YAML file dialog and other text elements are output into JSON and Script formats.
+DialogC is a Game Dialog Markup and Compilation tool. From a single YAML file, dialog and other text elements are output into JSON and Script formats.
 
 .. toctree::
    :maxdepth: 2
