@@ -9,7 +9,7 @@ from new import classobj
 from keyword import iskeyword
 from operator import itemgetter as _itemgetter
 from textwrap import dedent
-from collections import OrderedDict
+from collections import OrderedDict, Counter
 from mako.template import Template
 import pprint
 
@@ -214,7 +214,13 @@ def get_dynamic_static(lex):
                 if 'dynamic' in c.__dict__['__rl_flags__']:
                     dynamic_c[n] = c
                 elif 'static' in c.__dict__['__rl_flags__']:
-                    static_c[n] = c
+                    no = False
+                    for flg in ['log', 'snippet', 'spoken']:
+                        if flg in c.__dict__['__rl_flags__']:
+                            no = True
+                    if not no:
+                        static_c[n] = c
+    print dynamic_c, static_c
     return dynamic_c, static_c
 
 
@@ -226,6 +232,16 @@ def get_logs(lex):
                 if 'log' in c.__dict__['__rl_flags__']:
                     log_c[n] = c
     return log_c
+
+
+def get_snippets(lex):
+    snippet_c = OrderedDict()
+    for n, c in lex.items():
+        if n not in ProtectedNodeNames:
+            if '__rl_flags__' in c.__dict__:
+                if 'snippet' in c.__dict__['__rl_flags__']:
+                    snippet_c[n] = c
+    return snippet_c
 
 
 def get_spoken(lex):
@@ -250,6 +266,16 @@ class SpokenBlock(object):
     def IsGroupScene(self):
         return self._group_scene
 
+    @property
+    def WordCount(self):
+        c = Counter()
+        for e in self.entries:
+            c.update(e['dialog'].split())
+        x = 0
+        for v in c.values():
+            x += v
+        return x
+
 
 def doit():
 
@@ -259,39 +285,54 @@ def doit():
 
     log_entries = get_logs(lex)
 
-    story = {'dynamic_storyline':[]}
+    snippets = get_snippets(lex)
 
-    for cn, c in stc.items():
-        v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
-        elem_name = '_'.join(v)
-        story[elem_name] = c['story_line']
+    story = {}
+
+
+    if options.INCLUDEMAIN:
+        for cn, c in stc.items():
+            if c != None:
+                print 'C ->', c
+                v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+                elem_name = '_'.join(v)
+                story[elem_name] = c['story_line']
         
-    for cn, c in dyn.items():
-        v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
-        elem_name = '_'.join(v)
-        for k in c['keyed_storylines'].keys():
+    if options.INCLUDEDYN:
+        story['dynamic_storyline'] = []
+        for cn, c in dyn.items():
+            v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+            elem_name = '_'.join(v)
+            for k in c['keyed_storylines'].keys():
+                dsl = c['keyed_storylines'][k].__dict__
+                c_dsl = dict(dsl)
+                for x in c_dsl:
+                    if x.startswith('_'):
+                        del dsl[x]
 
-            dsl = c['keyed_storylines'][k].__dict__
-            c_dsl = dict(dsl)
-            for k in c_dsl:
-                if k.startswith('_'):
-                    del dsl[k]
+                dsl['player_data_key'] = k
+                story['dynamic_storyline'].append(dsl)
+            
 
-            story['dynamic_storyline'].append(dsl)
+    if options.INCLUDEAUX:
+        for cn, c in log_entries.items():
+            v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+            elem_name = '_'.join(v)
+            story[elem_name] = c['entries']
 
-    for cn, c in log_entries.items():
-        v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
-        elem_name = '_'.join(v)
-        story[elem_name] = c['entries']
+        for cn, c in snippets.items():
+            v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+            elem_name = '_'.join(v)
+            story[elem_name] = c['snippets']
 
-        
     djson = json.dumps(story)
 
     if options.VERBOSE:
         pprint.pprint(story)
     
     with open(os.path.abspath(options.OUTPUTFILE), 'w') as of:
-        of.write(djson)
+        #of.write(djson)
+        pprint.pprint(story, of)
 
     if options.SCRIPTOUTPUTFILE:
 
@@ -299,13 +340,23 @@ def doit():
         spoken_entries = get_spoken(lex)
 
         spoken_x_character = {}
+        story_block_x_location = OrderedDict()
+        word_count_x_character = {}
 
         for s in spoken_entries:
 
             char_name = re.split(r'([A-Z][a-z]*)', s)[1]
             spoken_x_character.setdefault(char_name, [])
+
             sb = SpokenBlock(char_name, spoken_entries[s].location, spoken_entries[s].description, spoken_entries[s].entries)
             spoken_x_character[char_name].append(sb)
+            story_block_x_location.setdefault(sb.location, []).append(sb)
+
+            word_count_x_character.setdefault(char_name, 0)
+            word_count_x_character[char_name] += sb.WordCount
+
+        if options.VERBOSE:
+            pprint.pprint(word_count_x_character)
 
         fp = os.path.join(__here__, './scriptlayout.mako')
         fp_t = Template(filename=fp)
@@ -313,6 +364,8 @@ def doit():
             title=lex.DOCUMENT.title,
             title_description=lex.DOCUMENT.title_description,
             spoken_x_character=spoken_x_character,
+            story_block_x_location=story_block_x_location,
+            word_count_x_character=word_count_x_character,
             copyright=lex.DOCUMENT.copyright,
             print_footer=True if options.PRINTFOOTER else False
             )
@@ -330,8 +383,12 @@ def parseArgs(args=None):
     parser.add_option("-d", dest="DIALOGFILE", help="Dialog file")
     parser.add_option("-o", dest="OUTPUTFILE", help="Output file")
     parser.add_option("-s", dest="SCRIPTOUTPUTFILE", help="Script Output file")
-    parser.add_option("-v", dest="VERBOSE", help="Verbose")
-    parser.add_option("--print-footer", dest="PRINTFOOTER", help="Print Footer")
+    parser.add_option("-v", action="store_true", default=False, dest="VERBOSE", help="Verbose")
+    parser.add_option("--print-footer", action="store_true", default=False, dest="PRINTFOOTER", help="Print Footer")
+
+    parser.add_option("--include-main", action="store_true", default=False, dest="INCLUDEMAIN", help="Include main conversation")
+    parser.add_option("--include-dyn", action="store_true", default=False, dest="INCLUDEDYN", help="Include all dynamic conversations")
+    parser.add_option("--include-aux", action="store_true", default=False, dest="INCLUDEAUX", help="Include all auxilary, supporting text")
 
 
     (options, args) = parser.parse_args()

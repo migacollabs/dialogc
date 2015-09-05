@@ -17,6 +17,7 @@
     height: 20px;
 }
 
+
 html {
     font-family: 'Courier New', Courier, 'Lucida Sans Typewriter', 'Lucida Typewriter', monospace;
     font-size: 12px;
@@ -56,11 +57,12 @@ html {
     <p>&nbsp</p>
 
 
-%for cn, sbs in spoken_x_character.items():
+%for loc, sbs in story_block_x_location.items():
 
     <div class="row">
     %for sb in sbs:
         <div class="s12 col">
+            <h2>&nbsp</h2>
             <h5>${sb.location.upper()}</h5>
             <h5>${sb.description}</h5>
         </div>
@@ -73,7 +75,7 @@ html {
 
             <div class="row">
                 <div class="s12 col center-align story-block">
-                    <h5>${cn.upper()}</h5>
+                    <h5>${sb.char_name.upper()}</h5>
                 </div>
                 <div class="s10 offset-s2 col left-align story-block">
                     <p><i>(${e_dict['parenthetical']})</i></p>
@@ -95,6 +97,28 @@ html {
     %endfor
     </div>
 %endfor
+
+</div>
+
+
+<p>&nbsp</p>
+<p>&nbsp</p>
+<p>&nbsp</p>
+<p>&nbsp</p>
+
+
+<div class="container">
+
+    <h4>Character Word Counts</h4>
+    <hr>
+
+    %for cn, c in word_count_x_character.items():
+    <div class="row">
+        <div class="s12 col">
+            <p>${cn} - ${c}</p>
+        </div>
+    </div>
+    %endfor
 
 </div>
 
