@@ -7,9 +7,9 @@ import time
 import copy
 import traceback
 try:
-    import pyttsx
+	import pyttsx
 except:
-    pass
+	pass
 import subprocess
 import urllib
 import shutil
@@ -29,2810 +29,3102 @@ __here__ = os.path.abspath(os.path.dirname(__file__))
 
 
 LogicalModelFlags = ['refl', 'expr', 'cntx', 'trck', 'dynamic', 'static', 
-                        'snippet', 'log', 'spoken', 'robotic', 'localize', 
-                        'record', 'statement', 'option']
+						'snippet', 'log', 'spoken', 'robotic', 'localize', 
+						'record', 'statement', 'option', 'character']
 
 ProtectedNodeNames = ['DOCUMENT']
 
+EMBEDDED_TRIGGERS = ['VIDEO_INSTANT_PLAY', 'DOSSIER', 'TRIGGER_ACTIVATE', 'CAMERA_TRANSFORM', 'UNLOCK_PLAYER_DATA_KEY']
+
+TRANSLATED_HTML_ESCAPES = {'&#39;': "'"}
+
 voice_engine = None
 try:
-    voice_engine = pyttsx.init()
-    print 'Instantiated voice_engine', pyttsx
+	voice_engine = pyttsx.init()
+	print 'Instantiated voice_engine', pyttsx
 except:
-    pass
+	pass
 
 
 class DinjLoader(yaml.Loader):
 
-    def __init__(self, stream):
-        self._root = os.path.split(stream.name)[0]
-        super(DinjLoader, self).__init__(stream)
+	def __init__(self, stream):
+		self._root = os.path.split(stream.name)[0]
+		super(DinjLoader, self).__init__(stream)
 
-    def include(self, node):
-        filename = os.path.join(self._root, self.construct_scalar(node))
-        with open(filename.strip().strip('\n-').strip('\n'), 'r') as f:
-            return yaml.load(f, DinjLoader)
+	def include(self, node):
+		filename = os.path.join(self._root, self.construct_scalar(node))
+		with open(filename.strip().strip('\n-').strip('\n'), 'r') as f:
+			return yaml.load(f, DinjLoader)
 
 DinjLoader.add_constructor('!include', DinjLoader.include)
-            
-            
+			
+			
 class Container(object):
-    """ an object that dynamically collects and sets attribute
-        from a class definition and keywords on __init__.
-        
-        future: supporting exclusion of attributes passed based on name
-    """
-    
-    def __init__(self, klass, **kwds):
-        klz = self.__class__.__bases__[0] \
-            if klass == None \
-            else klass
-        self._index = {}
-        self._set_inners(klz, **kwds)
-        self.collect()
-    
-    def collect(self, excludes=None):
-        self._index = \
-            [k for k in self.__dict__.keys() 
-                if k not in excludes and not k.startswith('_')] \
-            if excludes != None \
-            else [k for k in self.__dict__.keys() if not k.startswith('_')]
+	""" an object that dynamically collects and sets attribute
+		from a class definition and keywords on __init__.
+		
+		future: supporting exclusion of attributes passed based on name
+	"""
+	
+	def __init__(self, klass, **kwds):
+		klz = self.__class__.__bases__[0] \
+			if klass == None \
+			else klass
+		self._index = {}
+		self._set_inners(klz, **kwds)
+		self.collect()
+	
+	def collect(self, excludes=None):
+		self._index = \
+			[k for k in self.__dict__.keys() 
+				if k not in excludes and not k.startswith('_')] \
+			if excludes != None \
+			else [k for k in self.__dict__.keys() if not k.startswith('_')]
 
-    def is_(self, type_name):
-        if '__rl_flags__' in self.__dict__:
-            if type_name in self.__dict__['__rl_flags__']:
-                return True
-        return False
+	def is_(self, type_name):
+		if '__rl_flags__' in self.__dict__:
+			if type_name in self.__dict__['__rl_flags__']:
+				return True
+		return False
 
-    
-    def __getitem__(self, key):
-        if type(key)==int:
-            if key in self._index:
-                return self._index[key], self.__dict__[self._index[key]]
-        if key in self.__dict__:
-            return self.__dict__[key] 
-    
-    def __setitem__(self, key, value): 
-        self.__dict__[key] = value 
-    
-    def __delitem__(self, key):
-        if key in self.__dict__:
-            del self.__dict__[key]
-    
-    def __contains__(self, key):
-        return key in self.__dict__
-    
-    def _set_inners(self, klass, **kwds):
-        try:
-            for k,v in kwds.items():
-                if type(v) == dict:
-                    setattr(self, k, klass(**v))
-                else:
-                    setattr(self, k,v)
-        except:
-            print traceback.format_exc()
-            
-            
+	
+	def __getitem__(self, key):
+		if type(key)==int:
+			if key in self._index:
+				return self._index[key], self.__dict__[self._index[key]]
+		if key in self.__dict__:
+			return self.__dict__[key] 
+	
+	def __setitem__(self, key, value): 
+		self.__dict__[key] = value 
+	
+	def __delitem__(self, key):
+		if key in self.__dict__:
+			del self.__dict__[key]
+	
+	def __contains__(self, key):
+		return key in self.__dict__
+	
+	def _set_inners(self, klass, **kwds):
+		try:
+			for k,v in kwds.items():
+				if type(v) == dict:
+					setattr(self, k, klass(**v))
+				else:
+					setattr(self, k,v)
+		except:
+			print traceback.format_exc()
+			
+			
 def get_lexical_tokens(parsable=None, fromStr=None):
-    """ """
-    #d = yaml.load(fromStr if fromStr else open(parsable))
-    d = yaml.load(fromStr if fromStr else open(parsable), DinjLoader)
-    objs = {}
-    d2 = {}
-    for k,v in d.items():
-        if k.startswith('('):
-            k, flags = parse_lgcl_mdl_rl_name(k)
-            if flags:
-                v['__rl_flags__'] = flags
-        d2[k] = v
-    for k,v in d2.items():
-        oClz = classobj('%s'%k,(LexicalToken,), {})
-        obj = oClz(parsable, **d2[k])
-        objs[oClz.__name__]=obj
-    return LexicalToken(parsable, **objs)
+	""" """
+	#d = yaml.load(fromStr if fromStr else open(parsable))
+	d = yaml.load(fromStr if fromStr else open(parsable), DinjLoader)
+	objs = {}
+	d2 = {}
+	for k,v in d.items():
+		if k.startswith('('):
+			k, flags = parse_lgcl_mdl_rl_name(k)
+			if flags:
+				v['__rl_flags__'] = flags
+		d2[k] = v
+	for k,v in d2.items():
+		oClz = classobj('%s'%k,(LexicalToken,), {})
+		obj = oClz(parsable, **d2[k])
+		objs[oClz.__name__]=obj
+	return LexicalToken(parsable, **objs)
 
 
 def parse_lgcl_mdl_rl_name(s):
-    def clean_flag(flag):
-        return (flag.strip()
-                    .replace(',', '')
-                    .replace(';', '')
-                    .replace(':', ''))
-                    
-    if not s.replace(' ', '').endswith(')'):
-        raise SyntaxError('This is not a Rule, expecting "):" ending. %s'%s)
-        
-    s = s.strip()[1:-1].strip()
-    elems = [e.strip() for e in s.split(' ') if e]
-    if len(elems) >= 1:
-        flags = [clean_flag(flag) for flag in elems[1:]]
-        flags = [flag for flag in flags if flag in LogicalModelFlags]
-        return elems[0], tuple(flags)
-    else:
-        return elems[0], None
-                    
+	def clean_flag(flag):
+		return (flag.strip()
+					.replace(',', '')
+					.replace(';', '')
+					.replace(':', ''))
+					
+	if not s.replace(' ', '').endswith(')'):
+		raise SyntaxError('This is not a Rule, expecting "):" ending. %s'%s)
+		
+	s = s.strip()[1:-1].strip()
+	elems = [e.strip() for e in s.split(' ') if e]
+	if len(elems) >= 1:
+		flags = [clean_flag(flag) for flag in elems[1:]]
+		flags = [flag for flag in flags if flag in LogicalModelFlags]
+		return elems[0], tuple(flags)
+	else:
+		return elems[0], None
+					
 
 class LexicalToken(Container):
-    """
-    """
-    def __init__(self, parsable=None, **kwds):
-        Container.__init__(self, self.__class__, **kwds)
-        self.__parsable = parsable
+	"""
+	"""
+	def __init__(self, parsable=None, **kwds):
+		Container.__init__(self, self.__class__, **kwds)
+		self.__parsable = parsable
 
-    def items(self, lxtn=None):
-        """
-            returns .items() 
-        """ 
-        lxtn = self if lxtn == None else lxtn
-        return \
-            dict(
-                [(k,v,) for k,v in lxtn.__dict__.items() if k in self._index]
-            ).items()
+	def items(self, lxtn=None):
+		"""
+			returns .items() 
+		""" 
+		lxtn = self if lxtn == None else lxtn
+		return \
+			dict(
+				[(k,v,) for k,v in lxtn.__dict__.items() if k in self._index]
+			).items()
 
-    def keys(self, lxtn=None):
-        """
-            returns .items() 
-        """ 
-        lxtn = self if lxtn == None else lxtn
-        return [k for k in lxtn.__dict__.keys() if k in self._index]
+	def keys(self, lxtn=None):
+		"""
+			returns .items() 
+		""" 
+		lxtn = self if lxtn == None else lxtn
+		return [k for k in lxtn.__dict__.keys() if k in self._index]
 
-    def find(self, key, lxtn=None, only_lexical_tokens=True):
-        raise NotImplemented
+	def find(self, key, lxtn=None, only_lexical_tokens=True):
+		raise NotImplemented
 
-    def find_like(self, key, 
-                        found=None, lxtn=None, 
-                        only_lexical_tokens=True, 
-                        eval_obj_name='startswith'):
-        raise NotImplemented
+	def find_like(self, key, 
+						found=None, lxtn=None, 
+						only_lexical_tokens=True, 
+						eval_obj_name='startswith'):
+		raise NotImplemented
 
-    def load(self, **kwds):
-        """
-        """
-        self.__load()
-        for k,v in kwds.items():
-            setattr(self, k, v)
+	def load(self, **kwds):
+		"""
+		"""
+		self.__load()
+		for k,v in kwds.items():
+			setattr(self, k, v)
 
 
-    def __load(self):
+	def __load(self):
 
-        if self.__parsable:
-            self._lex = get_lexical_tokens(self.__parsable)
-            for k,v in self._lex.__dict__.items():
-                if type(k)==str and not k.startswith('_'):
-                    setattr(self, k, v)
+		if self.__parsable:
+			self._lex = get_lexical_tokens(self.__parsable)
+			for k,v in self._lex.__dict__.items():
+				if type(k)==str and not k.startswith('_'):
+					setattr(self, k, v)
 
-    def __getstate__(self):
-        """
-            remove refecences to dinj anonymous classes
-            returns dict of parsable: self.parsable
+	def __getstate__(self):
+		"""
+			remove refecences to dinj anonymous classes
+			returns dict of parsable: self.parsable
 
-        """
-        return {'__parsable':self.__parsable}
-    
-    def __setstate__(self, dict):
-        """
-            reloads inner dinj anonymous classes
-        """
-        self.__dict__['__parsable'] = dict['__parsable']
-        if self.__dict__['__parsable'] != None:
-            self.load()
+		"""
+		return {'__parsable':self.__parsable}
+	
+	def __setstate__(self, dict):
+		"""
+			reloads inner dinj anonymous classes
+		"""
+		self.__dict__['__parsable'] = dict['__parsable']
+		if self.__dict__['__parsable'] != None:
+			self.load()
 
 
 class Lexicon(Container):
-    """ """
-    def __init__(self, parsable=None, **kwds):
-        Container.__init__(self, self.__class__, **kwds)
-        if parsable:
-            self._lex = get_lexical_tokens(parsable)
-            for k,v in self._lex.__dict__.items():
-                if type(k)==str and not k.startswith('_'):
-                    setattr(self, k, v)
-            setattr(self, '__parsable', parsable)
+	""" """
+	def __init__(self, parsable=None, **kwds):
+		Container.__init__(self, self.__class__, **kwds)
+		if parsable:
+			self._lex = get_lexical_tokens(parsable)
+			for k,v in self._lex.__dict__.items():
+				if type(k)==str and not k.startswith('_'):
+					setattr(self, k, v)
+			setattr(self, '__parsable', parsable)
 
-    def items(self):
-        return self._lex.items() if self._lex else {}
-        
+	def items(self):
+		return self._lex.items() if self._lex else {}
+		
 
 def get_dynamic_static(lex):
-    dynamic_c = OrderedDict()
-    static_c = OrderedDict()
-    for n, c in lex.items():
-        if n not in ProtectedNodeNames:
-            if '__rl_flags__' in c.__dict__:
-                if 'dynamic' in c.__dict__['__rl_flags__']:
-                    dynamic_c[n] = c
-                elif 'static' in c.__dict__['__rl_flags__']:
-                    no = False
-                    for flg in ['log', 'snippet', 'spoken']:
-                        if flg in c.__dict__['__rl_flags__']:
-                            no = True
-                    if not no:
-                        if not only_blocks or n in only_blocks: 
-                            static_c[n] = c
-                            print '.QUEUEING', n
+	dynamic_c = OrderedDict()
+	static_c = OrderedDict()
+	_prev_names = []
+	for n, c in lex.items():
+		if n not in ProtectedNodeNames:
+			if '__rl_flags__' in c.__dict__:
+				if n in _prev_names:
+					print '! Non-unique block names. Exiting...'
+					sys.exit()
+				_prev_names.append(n)
+				if 'dynamic' in c.__dict__['__rl_flags__']:
+					dynamic_c[n] = c
+				elif 'static' in c.__dict__['__rl_flags__']:
+					no = False
+					for flg in ['log', 'snippet', 'spoken']:
+						if flg in c.__dict__['__rl_flags__']:
+							no = True
+					if not no:
+						if not only_blocks or n in only_blocks: 
+							static_c[n] = c
+							print '.QUEUEING', n
 
-    return dynamic_c, static_c
+	return dynamic_c, static_c
 
 
 def get_logs(lex):
-    log_c = OrderedDict()
-    for n, c in lex.items():
-        if n not in ProtectedNodeNames:
-            if '__rl_flags__' in c.__dict__:
-                if 'log' in c.__dict__['__rl_flags__']:
-                    if not only_blocks or n in only_blocks: 
-                        log_c[n] = c
-                        print '.QUEUEING', n
-    return log_c
+	log_c = OrderedDict()
+	for n, c in lex.items():
+		if n not in ProtectedNodeNames:
+			if '__rl_flags__' in c.__dict__:
+				if 'log' in c.__dict__['__rl_flags__']:
+					if not only_blocks or n in only_blocks: 
+						log_c[n] = c
+						print '.QUEUEING', n
+	return log_c
 
 
 def get_snippets(lex):
-    snippet_c = OrderedDict()
-    for n, c in lex.items():
-        if n not in ProtectedNodeNames:
-            if '__rl_flags__' in c.__dict__:
-                if 'snippet' in c.__dict__['__rl_flags__']:
-                    if not only_blocks or n in only_blocks: 
-                        snippet_c[n] = c
-                        print '.QUEUEING', n
-    return snippet_c
+	snippet_c = OrderedDict()
+	for n, c in lex.items():
+		if n not in ProtectedNodeNames:
+			if '__rl_flags__' in c.__dict__:
+				if 'snippet' in c.__dict__['__rl_flags__']:
+					if not only_blocks or n in only_blocks: 
+						snippet_c[n] = c
+						print '.QUEUEING', n
+	return snippet_c
 
 
 def get_spoken(lex):
-    log_c = OrderedDict()
-    for n, c in lex.items():
-        if n not in ProtectedNodeNames:
-            if '__rl_flags__' in c.__dict__:
-                if 'spoken' in c.__dict__['__rl_flags__']:
-                    if not only_blocks or n in only_blocks:
-                        log_c[n] = c
-                        print '.QUEUEING', n
-    return log_c
+	log_c = OrderedDict()
+	for n, c in lex.items():
+		if n not in ProtectedNodeNames:
+			if '__rl_flags__' in c.__dict__:
+				if 'spoken' in c.__dict__['__rl_flags__']:
+					if not only_blocks or n in only_blocks:
+						log_c[n] = c
+						print '.QUEUEING', n
+	return log_c
 
 
 def get_robotic(lex):
-    log_c = OrderedDict()
-    for n, c in lex.items():
-        if n not in ProtectedNodeNames:
-            if '__rl_flags__' in c.__dict__:
-                if 'robotic' in c.__dict__['__rl_flags__']:
-                    if not only_blocks or n in only_blocks: 
-                        log_c[n] = c
-                        print '.QUEUEING', n
-    return log_c
+	log_c = OrderedDict()
+	for n, c in lex.items():
+		if n not in ProtectedNodeNames:
+			if '__rl_flags__' in c.__dict__:
+				if 'robotic' in c.__dict__['__rl_flags__']:
+					if not only_blocks or n in only_blocks: 
+						log_c[n] = c
+						print '.QUEUEING', n
+	return log_c
 
 
 def get_localize(lex):
-    log_c = OrderedDict()
-    for n, c in lex.items():
-        print 'N ->', n
-        if n not in ProtectedNodeNames:
-            if '__rl_flags__' in c.__dict__:
-                if 'localize' in c.__dict__['__rl_flags__']:
-                    if not only_blocks or n in only_blocks:
-                        log_c[n] = c
-                        print '.QUEUEING', n
-    return log_c
+	log_c = OrderedDict()
+	for n, c in lex.items():
+		print 'N ->', n
+		if n not in ProtectedNodeNames:
+			if '__rl_flags__' in c.__dict__:
+				if 'localize' in c.__dict__['__rl_flags__']:
+					if not only_blocks or n in only_blocks:
+						log_c[n] = c
+						print '.QUEUEING', n
+	return log_c
+
+
+def clean_embedded_triggers(d, et):
+	print '. CLEAN', d, '------', et
+	spl = d.split(et)
+	parand_tag = spl[1][spl[1].index('('): spl[1].index(')') + 1]
+	t = spl[0] + et + parand_tag
+
+	if len(spl) > 1:
+		t += spl[1].split(parand_tag)[1]
+		
+	return t
 
 
 class SpokenBlock(object):
-    def __init__(self, char_name, location, description, entries, group_scene=False):
-        self.char_name = char_name
-        self.location = location
-        self.description = description
-        self.entries = entries
-        self._group_scene = group_scene
+	def __init__(self, char_name, location, description, entries, group_scene=False):
+		self.char_name = char_name
+		self.location = location
+		self.description = description
+		self.entries = entries
+		self._group_scene = group_scene
 
-    @property
-    def IsGroupScene(self):
-        return self._group_scene
+	@property
+	def IsGroupScene(self):
+		return self._group_scene
 
-    @property
-    def WordCount(self):
-        c = Counter()
-        for e in self.entries:
-            c.update(e['dialog'].split())
-        x = 0
-        for v in c.values():
-            x += v
-        return x
+	@property
+	def WordCount(self):
+		c = Counter()
+		for e in self.entries:
+			c.update(e['dialog'].split())
+		x = 0
+		for v in c.values():
+			x += v
+		return x
 
 
 def doit():
 
-    lex = Lexicon(parsable=os.path.abspath(options.DIALOGFILE))
-    
-    dyn, stc = get_dynamic_static(lex)
+	lex = Lexicon(parsable=os.path.abspath(options.DIALOGFILE))
+	
+	dyn, stc = get_dynamic_static(lex)
 
-    log_entries = get_logs(lex)
-
-    snippets = get_snippets(lex)
+	# pprint.pprint(dyn)
 
-    story = {}
-
-
-    if options.INCLUDEMAIN:
-        for cn, c in stc.items():
-            if c != None:
-                v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
-                elem_name = '_'.join(v)
-                story[elem_name] = c['story_line']
-
-        
-    if options.INCLUDEDYN:
-        story['dynamic_storyline'] = []
-        for cn, c in dyn.items():
-            v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
-            elem_name = '_'.join(v)
-            for k in c['keyed_storylines'].keys():
-                dsl = c['keyed_storylines'][k].__dict__
-                c_dsl = dict(dsl)
-                for x in c_dsl:
-                    if x.startswith('_'):
-                        del dsl[x]
-
-                dsl['player_data_key'] = k
-                story['dynamic_storyline'].append(dsl)
-            
+	log_entries = get_logs(lex)
 
-    if options.INCLUDEAUX:
-        for cn, c in log_entries.items():
-            v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
-            elem_name = '_'.join(v)
-            story[elem_name] = c['entries']
+	snippets = get_snippets(lex)
 
-        for cn, c in snippets.items():
-            v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
-            elem_name = '_'.join(v)
-            story[elem_name] = c['snippets']
+	story = {}
 
+	if options.INCLUDEMAIN:
+		for cn, c in stc.items():
+			if c != None:
+				v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+				elem_name = '_'.join(v)
+				story[elem_name] = c['story_line']
+
+		
+	if options.INCLUDEDYN:
+		story['dynamic_storyline'] = []
+		for cn, c in dyn.items():
+			v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+			elem_name = '_'.join(v)
+			for k in c['keyed_storylines'].keys():
+				dsl = c['keyed_storylines'][k].__dict__
+				c_dsl = dict(dsl)
+				for x in c_dsl:
+					if x.startswith('_'):
+						del dsl[x]
+
+				dsl['player_data_key'] = k
+				story['dynamic_storyline'].append(dsl)
 
-    if options.INCLUDEVOX:
 
-        global translate_codes, translate_service
+	# pprint.pprint(story['dynamic_storyline'])
+	# sys.exit()
+			
 
-        # translate_codes = []
-        # translate_service = None
-        # if options.TRANSLATE:
-        #     translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
-        #     for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
-        #         translate_codes.append(lang_code.strip().lstrip())
+	if options.INCLUDEAUX:
+		for cn, c in log_entries.items():
+			v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+			elem_name = '_'.join(v)
+			story[elem_name] = c['entries']
 
+		for cn, c in snippets.items():
+			v = [a.lower() for a in re.split(r'([A-Z][a-z]*)', cn) if a]
+			elem_name = '_'.join(v)
+			story[elem_name] = c['snippets']
 
-        audio_parts = []
-        spoken_entries = get_spoken(lex)
 
-        spoken_x_character = {}
-        story_block_x_location = OrderedDict()
-        word_count_x_character = {}
+	if options.INCLUDEVOX:
 
-        for s in spoken_entries:
+		global translate_codes, translate_service
 
-            char_name = re.split(r'([A-Z][a-z]*)', s)[1]
-            spoken_x_character.setdefault(char_name, [])
+		# translate_codes = []
+		# translate_service = None
+		# if options.TRANSLATE:
+		#     translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
+		#     for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
+		#         translate_codes.append(lang_code.strip().lstrip())
 
-            sb = SpokenBlock(char_name, spoken_entries[s].location, spoken_entries[s].description, spoken_entries[s].entries)
-            spoken_x_character[char_name].append(sb)
-            story_block_x_location.setdefault(sb.location, []).append(sb)
 
-            word_count_x_character.setdefault(char_name, 0)
-            word_count_x_character[char_name] += sb.WordCount
+		audio_parts = []
+		spoken_entries = get_spoken(lex)
 
-        vox_d = {}
-        for cn in spoken_x_character.keys():
-            char_d = {}
-            for loc, sbs in story_block_x_location.items():
-                for sb in sbs:
-                    if sb.char_name == cn:
-                        char_d.setdefault(loc, {})
-                        dialog_entries = [e for e in sb.entries]
-                        char_d[loc]['en'] = dialog_entries
+		spoken_x_character = {}
+		story_block_x_location = OrderedDict()
+		word_count_x_character = {}
 
-                        for t_lang_code in translate_codes:
+		for s in spoken_entries:
 
-                            print '+ TRANSLATE', t_lang_code, sb.char_name, loc
+			char_name = re.split(r'([A-Z][a-z]*)', s)[1]
+			spoken_x_character.setdefault(char_name, [])
 
-                            attempts = 0
-                            while attempts < 3:
-                                try:
+			sb = SpokenBlock(char_name, spoken_entries[s].location, spoken_entries[s].description, spoken_entries[s].entries)
+			spoken_x_character[char_name].append(sb)
+			story_block_x_location.setdefault(sb.location, []).append(sb)
 
-                                    t_res = translate_service.translations().list(
-                                        source='en',
-                                        target=t_lang_code,
-                                        q=[e['dialog'] for e in sb.entries]
-                                    ).execute()
+			word_count_x_character.setdefault(char_name, 0)
+			word_count_x_character[char_name] += sb.WordCount
 
-                                    audio_filename = dialog_entries[0]['audio'] if 'audio' in dialog_entries[0] else None
-                                    if audio_filename:
-                                        audio_filename = os.path.splitext(audio_filename)[0]
+		vox_d = {}
+		for cn in spoken_x_character.keys():
+			char_d = {}
+			for loc, sbs in story_block_x_location.items():
+				for sb in sbs:
+					if sb.char_name == cn:
+						char_d.setdefault(loc, {})
+						dialog_entries = [e for e in sb.entries]
+						char_d[loc]['en'] = dialog_entries
 
-                                    translated = []
-                                    for i in range(0, len(dialog_entries)):
-                                        translated.append(
-                                            dict(
-                                                dialog=t_res['translations'][i]['translatedText'],
-                                                audio=audio_filename
-                                                )
-                                            )
+						for t_lang_code in translate_codes:
 
-                                    char_d[loc][t_lang_code] = translated
+							print '+ TRANSLATE', t_lang_code, sb.char_name, loc
 
-                                    attempts = 3
-                                    time.sleep(.5)
-                                    break
+							attempts = 0
+							while attempts < 10:
+								try:
 
-                                except:
-                                    print traceback.format_exc()
-                                    
-                                    time.sleep(1)
-                                    attempts += 1
+									t_res = translate_service.translations().list(
+										source='en',
+										target=t_lang_code,
+										q=[e['dialog'] for e in sb.entries]
+									).execute()
 
-            vox_d.setdefault(cn, char_d)
+									audio_filename = dialog_entries[0]['audio'] if 'audio' in dialog_entries[0] else None
+									if audio_filename:
+										audio_filename = os.path.splitext(audio_filename)[0]
 
-        story['character_dialog'] = vox_d
+									translated = []
+									for i in range(0, len(dialog_entries)):
+										translated.append(
+											dict(
+												dialog=t_res['translations'][i]['translatedText'],
+												audio=audio_filename
+												)
+											)
 
+									char_d[loc][t_lang_code] = translated
 
-        if options.VERBOSE:
-            pprint.pprint(story)
+									attempts = 10 # though break should take care of this
+									time.sleep(.5)
+									break
 
+								except:
+									print traceback.format_exc()
+									
+									time.sleep(1)
+									attempts += 1
 
-        if translate_codes and translate_service:
-            # translated, create lang files
+			vox_d.setdefault(cn, char_d)
 
-            if 'en' not in translate_codes:
-                translate_codes.append('en')
+		story['character_dialog'] = vox_d
 
-            for t_lang_code in translate_codes:
 
-                t_lang_result = {'character_dialog': {}}
+		if options.VERBOSE:
+			pprint.pprint(story)
 
-                # {"character_dialog": {"Nasr": {"INT Quadrant 7 - Suspended Animation Sleep Chamber": {"fr": [{"txt":
 
-                for character_name, cd in story['character_dialog'].items():
+		if translate_codes and translate_service:
+			# translated, create lang files
 
-                    t_lang_result['character_dialog'].setdefault(character_name, {})
+			if 'en' not in translate_codes:
+				translate_codes.append('en')
 
-                    for location, langs in cd.items():
+			for t_lang_code in translate_codes:
 
-                        t_lang_result['character_dialog'][character_name].setdefault(location, {})
-                        t_lang_result['character_dialog'][character_name][location][t_lang_code] = langs[t_lang_code]
+				t_lang_result = {'character_dialog': {}}
 
-                t_json_data = json.dumps(t_lang_result)
+				# {"character_dialog": {"Nasr": {"INT Quadrant 7 - Suspended Animation Sleep Chamber": {"fr": [{"txt":
 
-                if not options.FLIGHTTEST:
-                    try:
-                        with open(t_lang_code + '_subtitles_localized.json', 'w') as of:
-                            of.write(t_json_data)
-                    except:
-                        pass
+				for character_name, cd in story['character_dialog'].items():
 
+					t_lang_result['character_dialog'].setdefault(character_name, {})
 
-        # dump the master
-        djson = json.dumps(story)
+					for location, langs in cd.items():
 
-        if not options.FLIGHTTEST:
-            try:
-                with open('master_subtitles_localized.json', 'w') as of:
-                    of.write(djson)
-            except:
-                pass
+						t_lang_result['character_dialog'][character_name].setdefault(location, {})
+						t_lang_result['character_dialog'][character_name][location][t_lang_code] = langs[t_lang_code]
 
+				t_json_data = json.dumps(t_lang_result)
 
-    # -------------- 
+				if not options.FLIGHTTEST:
+					try:
+						with open(t_lang_code + '_subtitles_localized.json', 'w') as of:
+							of.write(t_json_data)
+					except:
+						pass
 
 
-    regen_blocks = []
-    if options.REGENBLOCKS:
-        for x in options.REGENBLOCKS.lstrip('[').strip(']').split(','):
-            regen_blocks.append(x.strip().lstrip())
+		# dump the master
+		djson = json.dumps(story)
 
+		if not options.FLIGHTTEST:
+			try:
+				with open('master_subtitles_localized.json', 'w') as of:
+					of.write(djson)
+			except:
+				pass
 
-    if options.SCRIPTOUTPUTFILE:
 
-        audio_parts = []
-        spoken_entries = get_spoken(lex)
+	# -------------- 
 
-        spoken_x_character = {}
-        story_block_x_location = OrderedDict()
-        word_count_x_character = {}
 
-        for s in spoken_entries:
-
-            char_name = re.split(r'([A-Z][a-z]*)', s)[1]
-            spoken_x_character.setdefault(char_name, [])
-
-            sb = SpokenBlock(char_name, spoken_entries[s].location, spoken_entries[s].description, spoken_entries[s].entries)
-            spoken_x_character[char_name].append(sb)
-            story_block_x_location.setdefault(sb.location, []).append(sb)
+	regen_blocks = []
+	if options.REGENBLOCKS:
+		for x in options.REGENBLOCKS.lstrip('[').strip(']').split(','):
+			regen_blocks.append(x.strip().lstrip())
 
-            word_count_x_character.setdefault(char_name, 0)
-            word_count_x_character[char_name] += sb.WordCount
 
-        if options.VERBOSE:
-            pprint.pprint(word_count_x_character)
+	if options.SCRIPTOUTPUTFILE:
 
-        fp = os.path.join(__here__, './scriptlayout.mako')
-        fp_t = Template(filename=fp)
-        tmpl_vars = dict(
-            title=lex.DOCUMENT.title,
-            title_description=lex.DOCUMENT.title_description,
-            spoken_x_character=spoken_x_character,
-            story_block_x_location=story_block_x_location,
-            word_count_x_character=word_count_x_character,
-            copyright=lex.DOCUMENT.copyright,
-            print_footer=True if options.PRINTFOOTER else False
-            )
-        if not options.FLIGHTTEST:
-            with open(os.path.join(__here__, os.path.basename(options.SCRIPTOUTPUTFILE)), 'w') as f:
-                f.write(fp_t.render(**tmpl_vars))
+		audio_parts = []
+		spoken_entries = get_spoken(lex)
 
-        if options.OUTPUTXCHAR:
-            try:
-                filename, ext = os.path.splitext(options.SCRIPTOUTPUTFILE)
+		spoken_x_character = {}
+		story_block_x_location = OrderedDict()
+		word_count_x_character = {}
 
-                print spoken_x_character.keys()
+		for s in spoken_entries:
+
+			char_name = re.split(r'([A-Z][a-z]*)', s)[1]
+			spoken_x_character.setdefault(char_name, [])
+
+			sb = SpokenBlock(char_name, spoken_entries[s].location, spoken_entries[s].description, spoken_entries[s].entries)
+			spoken_x_character[char_name].append(sb)
+			story_block_x_location.setdefault(sb.location, []).append(sb)
+
+			word_count_x_character.setdefault(char_name, 0)
+			word_count_x_character[char_name] += sb.WordCount
 
-                for cn in spoken_x_character.keys():
-                    char_d = OrderedDict()
-                    for loc, sbs in story_block_x_location.items():
-                        for sb in sbs:
-                            if sb.char_name == cn:
-                                char_d.setdefault(loc, []).append(sb)
+		if options.VERBOSE:
+			pprint.pprint(word_count_x_character)
 
-                    char_filename = '%s.%s%s'%(filename, cn, ext)
-                    nfp = os.path.join(__here__, char_filename)
+		fp = os.path.join(__here__, './scriptlayout.mako')
+		fp_t = Template(filename=fp)
+		tmpl_vars = dict(
+			title=lex.DOCUMENT.title,
+			title_description=lex.DOCUMENT.title_description,
+			spoken_x_character=spoken_x_character,
+			story_block_x_location=story_block_x_location,
+			word_count_x_character=word_count_x_character,
+			copyright=lex.DOCUMENT.copyright,
+			print_footer=True if options.PRINTFOOTER else False
+			)
+		if not options.FLIGHTTEST:
+			with open(os.path.join(__here__, os.path.basename(options.SCRIPTOUTPUTFILE)), 'w') as f:
+				f.write(fp_t.render(**tmpl_vars))
 
-                    if char_d:
-                        fp = os.path.join(__here__, './scriptlayout.mako')
-                        fp_t = Template(filename=fp)
-                        tmpl_vars = dict(
-                            title=lex.DOCUMENT.title,
-                            title_description=lex.DOCUMENT.title_description,
-                            spoken_x_character=spoken_x_character,
-                            story_block_x_location=char_d,
-                            word_count_x_character={cn:word_count_x_character[cn]},
-                            copyright=lex.DOCUMENT.copyright,
-                            print_footer=True if options.PRINTFOOTER else False
-                            )
-                        if not options.FLIGHTTEST:
-                            with open(os.path.join(__here__, char_filename), 'w') as f:
-                                f.write(fp_t.render(**tmpl_vars))
-            except:
-                print traceback.format_exc()
+		if options.OUTPUTXCHAR:
+			try:
+				filename, ext = os.path.splitext(options.SCRIPTOUTPUTFILE)
 
-    
-    if options.ROBOTVOICEGEN:
+				print spoken_x_character.keys()
 
-        # translate_codes = []
-        # translate_service = None
-        # if options.TRANSLATE:
-        #     translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
-        #     for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
-        #         translate_codes.append(lang_code.strip().lstrip())
+				for cn in spoken_x_character.keys():
+					char_d = OrderedDict()
+					for loc, sbs in story_block_x_location.items():
+						for sb in sbs:
+							if sb.char_name == cn:
+								char_d.setdefault(loc, []).append(sb)
 
-        only_pdks = []
-        if options.ONLYPDKS:
-            for pdk in options.ONLYPDKS.lstrip('[').strip(']').split(','):
-                only_pdks.append(pdk.strip().lstrip())
+					char_filename = '%s.%s%s'%(filename, cn, ext)
+					nfp = os.path.join(__here__, char_filename)
 
-        cereproc_engine = None
-        if options.CEREPROCAPIKEY:
-            from suds.client import Client
-            cereproc_engine = Client("https://cerevoice.com/soap/soap_1_1.php?WSDL")
+					if char_d:
+						fp = os.path.join(__here__, './scriptlayout.mako')
+						fp_t = Template(filename=fp)
+						tmpl_vars = dict(
+							title=lex.DOCUMENT.title,
+							title_description=lex.DOCUMENT.title_description,
+							spoken_x_character=spoken_x_character,
+							story_block_x_location=char_d,
+							word_count_x_character={cn:word_count_x_character[cn]},
+							copyright=lex.DOCUMENT.copyright,
+							print_footer=True if options.PRINTFOOTER else False
+							)
+						if not options.FLIGHTTEST:
+							with open(os.path.join(__here__, char_filename), 'w') as f:
+								f.write(fp_t.render(**tmpl_vars))
+			except:
+				print traceback.format_exc()
 
-        robot_dialog = get_robotic(lex)
+	
+	if options.ROBOTVOICEGEN:
 
-        result = {}
-        master_json = {}
-        master_fp = os.path.join(__here__, 'master_robotspeech.json')
-        master_pfp = os.path.join(__here__, 'master_robotspeech.json.bk')
-        if os.path.exists(master_fp):
-            try:
-                if not options.FLIGHTTEST:
-                    shutil.copy(master_fp, master_pfp)
-            except:
-                print 'Can Not SHUTIL Copy', master_fp, '->', master_pfp
-                print traceback.format_exc()
-            with open(master_fp, 'r') as f:
-                try:
-                    master_data = f.read()
-                    if master_data:
-                        master_json = json.loads(master_data)
-                        print 'Loaded Master JSON', master_json.keys()
-                except:
-                    pass
+		# translate_codes = []
+		# translate_service = None
+		# if options.TRANSLATE:
+		#     translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
+		#     for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
+		#         translate_codes.append(lang_code.strip().lstrip())
 
+		only_pdks = []
+		if options.ONLYPDKS:
+			for pdk in options.ONLYPDKS.lstrip('[').strip(']').split(','):
+				only_pdks.append(pdk.strip().lstrip())
 
-        for robot_name, rd in robot_dialog.items():
+		cereproc_engine = None
+		if options.CEREPROCAPIKEY:
+			from suds.client import Client
+			cereproc_engine = Client("https://cerevoice.com/soap/soap_1_1.php?WSDL")
 
-            generated_audio_paths = []
+		robot_dialog = get_robotic(lex)
 
-            robot_dir =  os.path.join(__here__, robot_name)
-            try:
-                os.makedirs(robot_dir)
-            except:
-                pass
+		result = {}
+		master_json = {}
+		# master_fp = os.path.join(__here__, 'master_robotspeech.json')
+		# master_pfp = os.path.join(__here__, 'master_robotspeech.json.bk')
+		master_fp = 'master_robotspeech.json'
+		master_pfp = 'master_robotspeech.json.bk'
+		if os.path.exists(master_fp):
+			try:
+				if not options.FLIGHTTEST:
+					shutil.copy(master_fp, master_pfp)
+			except:
+				print 'Can Not SHUTIL Copy', master_fp, '->', master_pfp
+				print traceback.format_exc()
+			with open(master_fp, 'r') as f:
+				try:
+					master_data = f.read()
+					if master_data:
+						master_json = json.loads(master_data)
+						print 'Loaded Master JSON', master_json.keys()
+				except:
+					pass
 
 
-            if robot_name in ignore_blocks:
-                print '. IGNORE', robot_name
-                try:
-                    result[robot_name] = master_json[robot_name]
-                except:
-                    pass
-                continue
+		for robot_name, rd in robot_dialog.items():
 
+			generated_audio_paths = []
 
-            if hasattr(rd, 'question_answer'):
+			robot_dir =  os.path.join(__here__, robot_name)
+			try:
+				os.makedirs(robot_dir)
+			except:
+				pass
 
-                for x, t in rd.question_answer.items():
 
-                    for lang_code, txt in t.question_text.items():
+			if robot_name in ignore_blocks:
+				print '. IGNORE', robot_name
+				try:
+					result[robot_name] = master_json[robot_name]
+				except:
+					pass
+				continue
 
-                        #if not lang_code.endswith('_tts'):
-                        if lang_code == 'en':
 
-                            do_translate = True
+			if hasattr(rd, 'question_answer'):
 
-                            a_txt = t.answer_text[lang_code]
+				for x, t in rd.question_answer.items():
 
-                            result.setdefault(robot_name, {}).setdefault('question_answer', {}).setdefault(x, {}).setdefault(lang_code, {})['answer_text'] = a_txt
+					for lang_code, txt in t.question_text.items():
 
-                            # result.setdefault(robot_name, {}).setdefault(x, {}).setdefault(lang_code, {})['answer_text'] = a_txt
+						#if not lang_code.endswith('_tts'):
+						if lang_code == 'en':
 
-                            result[robot_name]['question_answer'][x]['rank'] = t.rank
+							do_translate = True
+							do_audio = True
 
-                            q_txt = t.question_text[lang_code]
+							a_txt = t.answer_text[lang_code]
 
-                            result[robot_name]['question_answer'][x][lang_code]['question_text'] = q_txt
+							result.setdefault(robot_name, {}).setdefault('question_answer', {}).setdefault(x, {}).setdefault(lang_code, {})['answer_text'] = a_txt
 
-                            try:
-                                if master_json[robot_name]['question_answer'][x][lang_code]['question_text'] == q_txt:
-                                    do_translate = False
-                            except:
-                                pass
+							# result.setdefault(robot_name, {}).setdefault(x, {}).setdefault(lang_code, {})['answer_text'] = a_txt
 
-                            if do_translate:
+							result[robot_name]['question_answer'][x]['rank'] = t.rank
 
-                                print '+ TRANSLATE', x
+							q_txt = t.question_text[lang_code]
 
-                                if a_txt != None and q_txt != None:
+							result[robot_name]['question_answer'][x][lang_code]['question_text'] = q_txt
 
-                                    # translate if needed
-                                    if translate_service and lang_code == 'en':
+							try:
+								if master_json[robot_name]['question_answer'][x][lang_code]['question_text'] == q_txt:
+									do_translate = False
+									do_audio = False
+							except:
+								pass
 
-                                        for t_lang_code in translate_codes:
+							try:
+								# check for all requested lang codes
+								for t_lang_code in translate_codes:
+									_ = master_json[robot_name]['question_answer'][x][t_lang_code]['question_text']
+									_ = master_json[robot_name]['question_answer'][x][t_lang_code]['answer_text']
+								do_translate = False
+								print '. ALL TRANSLATION CODES EXIST IN MASTER. NO TRANSLATION REQ.', str(translate_codes)
+							except:
+								print traceback.format_exc()
+								do_translate = True
 
-                                            attempts = 0
-                                            while attempts < 3:
-                                                try:
+							if do_translate:
 
-                                                    t_res = translate_service.translations().list(
-                                                        source='en',
-                                                        target=t_lang_code,
-                                                        q=[q_txt, a_txt]
-                                                    ).execute()
+								print '+ TRANSLATE', x
 
-                                                    t_q_txt = t_res['translations'][0]['translatedText']
-                                                    t_a_txt = t_res['translations'][1]['translatedText']
+								if a_txt != None and q_txt != None:
 
-                                                    result[robot_name]['question_answer'][x].setdefault(t_lang_code, {})['question_text'] = t_q_txt
-                                                    result[robot_name]['question_answer'][x][t_lang_code]['answer_text'] = t_a_txt
+									# translate if needed
+									if translate_service and lang_code == 'en':
 
-                                                    attempts = 3
-                                                    time.sleep(.15)
-                                                    break
+										for t_lang_code in translate_codes:
 
-                                                except:
-                                                    print traceback.format_exc()
-                                                    
-                                                    attempts += 1
-                                                    time.sleep(1*attempts)
+											attempts = 0
+											while attempts < 10:
+												try:
 
-                                else:
-                                    for t_lang_code in translate_codes:
-                                        result[robot_name]['question_answer'][x].setdefault(t_lang_code, {})
-                                        result[robot_name]['question_answer'][x][t_lang_code]['question_text'] = None
-                                        result[robot_name]['question_answer'][x][t_lang_code]['answer_text'] = None
+													t_res = translate_service.translations().list(
+														source='en',
+														target=t_lang_code,
+														q=[q_txt, a_txt]
+													).execute()
 
-                            else:
+													t_q_txt = t_res['translations'][0]['translatedText']
+													t_a_txt = t_res['translations'][1]['translatedText']
 
-                                print '. TRANSLATE', x
+													for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+														t_q_txt = t_q_txt.replace(k_, v_)
+														t_a_txt = t_a_txt.replace(k_, v_)
 
-                                try:
-                                    for t_lang_code in translate_codes:
-                                        result[robot_name]['question_answer'][x].setdefault(t_lang_code, {})
-                                        result[robot_name]['question_answer'][x][t_lang_code]['question_text'] = master_json[robot_name]['question_answer'][x][t_lang_code]['question_text']
-                                        result[robot_name]['question_answer'][x][t_lang_code]['answer_text'] = master_json[robot_name]['question_answer'][x][t_lang_code]['answer_text']
-                                except:
-                                    print traceback.format_exc()
+													result[robot_name]['question_answer'][x].setdefault(t_lang_code, {})['question_text'] = t_q_txt
+													result[robot_name]['question_answer'][x][t_lang_code]['answer_text'] = t_a_txt
 
+													attempts = 10 # though break should take care of this
+													time.sleep(.15)
+													break
 
-                            if not options.ONLYENROBOTVOICEGEN or (options.ONLYENROBOTVOICEGEN and lang_code == 'en'):
+												except:
+													print traceback.format_exc()
+													
+													attempts += 1
+													time.sleep(1*attempts)
 
-                                wav_file = None
+								else:
+									for t_lang_code in translate_codes:
+										result[robot_name]['question_answer'][x].setdefault(t_lang_code, {})
+										result[robot_name]['question_answer'][x][t_lang_code]['question_text'] = None
+										result[robot_name]['question_answer'][x][t_lang_code]['answer_text'] = None
 
-                                if not 'use_ext_audio' in t or t['use_ext_audio'] == False:
+							else:
 
+								print '. TRANSLATE', x
 
-                                    # override if this block is flagged
-                                    if regen_blocks:
-                                        if robot_name in regen_blocks or 'ALL' in regen_blocks:
-                                            process_audio = True
+								try:
+									for t_lang_code in translate_codes:
+										result[robot_name]['question_answer'][x].setdefault(t_lang_code, {})
+										result[robot_name]['question_answer'][x][t_lang_code]['question_text'] = master_json[robot_name]['question_answer'][x][t_lang_code]['question_text']
+										result[robot_name]['question_answer'][x][t_lang_code]['answer_text'] = master_json[robot_name]['question_answer'][x][t_lang_code]['answer_text']
+								except:
+									print traceback.format_exc()
 
 
-                                    process_audio = True
+							if not options.ONLYENROBOTVOICEGEN or (options.ONLYENROBOTVOICEGEN and lang_code == 'en'):
 
-                                    wav_file = os.path.join(robot_dir, x + '.wav')
-                                    if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
-                                        wav_file = os.path.join(robot_dir, lang_code + '_' + x + '.wav')
+								wav_file = None
 
-                                    generated_audio_paths.append(wav_file)
+								if not 'use_ext_audio' in t or t['use_ext_audio'] == False:
 
-                                    result[robot_name]['question_answer'][x][lang_code]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
+									process_audio = False
 
-                                    try:
-                                        if master_json[robot_name]['question_answer'][x][lang_code]['audio'] == result[robot_name]['question_answer'][x][lang_code]['audio']:
-                                            process_audio = do_translate
-                                    except:
-                                        pass
+									# check to see if text has changed
+									try:
+										if master_json[robot_name]['question_answer'][x]['en']['answer_text'] != t.answer_text[lang_code]:
+											process_audio = True
+									except:
+										print traceback.format_exc()
+										process_audio = True
 
-                                    v_txt = t.answer_text[lang_code]
-                                    if 'en_tts' in t.answer_text:
-                                        v_txt = t.answer_text['en_tts']
-                                        result[robot_name]['question_answer'][x].setdefault('pronuctiation', {})['answer_text'] = v_txt
 
-                                        try:
-                                            if master_json[robot_name]['question_answer'][x]['pronuctiation']['answer_text'] != v_txt:
-                                                process_audio = True
-                                        except:
-                                            pass
+									# override if this block is flagged
+									if regen_blocks:
+										if robot_name in regen_blocks or 'ALL' in regen_blocks:
+											process_audio = True
 
+									wav_file = os.path.join(robot_dir, x + '.wav')
+									if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
+										wav_file = os.path.join(robot_dir, lang_code + '_' + x + '.wav')
 
-                                    # check to see if text has changed
-                                    try:
-                                        if master_json[robot_name]['question_answer'][x]['en']['answer_text'] != t.answer_text[lang_code]:
-                                            process_audio = True
-                                    except:
-                                        print traceback.format_exc()
+									generated_audio_paths.append(wav_file)
 
+									result[robot_name]['question_answer'][x][lang_code]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
 
-                                    # override if this block is flagged
-                                    if regen_blocks:
-                                        if robot_name in regen_blocks or 'ALL' in regen_blocks:
-                                            process_audio = True
+									try:
+										if master_json[robot_name]['question_answer'][x][lang_code]['audio'] == result[robot_name]['question_answer'][x][lang_code]['audio']:
+											process_audio = do_audio
+									except:
+										process_audio = True
 
 
-                                    if process_audio:
+									v_txt = t.answer_text[lang_code]
+									if 'en_tts' in t.answer_text:
+										v_txt = t.answer_text['en_tts']
+										result[robot_name]['question_answer'][x].setdefault('pronuctiation', {})['answer_text'] = v_txt
 
-                                        print '+ AUDIO', x
+										try:
+											if master_json[robot_name]['question_answer'][x]['pronuctiation']['answer_text'] != v_txt:
+												process_audio = True
+										except:
+											process_audio = True
 
-                                        if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                            try:
-                                                voice_engine.setProperty('voice', rd.voice)
-                                                voice_engine.speakToFile(v_txt, wav_file)
-                                                voice_engine.runAndWait()
-                                            except:
-                                                print traceback.format_exc()
+									if process_audio:
 
-                                        elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
+										print '+ AUDIO', x
 
-                                            pass
+										if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                            # echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
+											try:
+												voice_engine.setProperty('voice', rd.voice)
+												voice_engine.speakToFile(v_txt, wav_file)
+												voice_engine.runAndWait()
+											except:
+												print traceback.format_exc()
 
-                                            cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
+										elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                            try:
-                                                subprocess.call(cmd, shell=True)
-                                            except:
-                                                print traceback.format_exc()
+											pass
 
-                                        # OR USE THE CERE PROC CLOUD
-                                        elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
+											# echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
 
-                                            request = cereproc_engine.service.speakSimple(
-                                                options.CEREPROCAPIKEY, 
-                                                options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
-                                            if request.resultCode == 1:
-                                                audio_file = urllib.URLopener()
-                                                audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
+											cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
 
+											try:
+												subprocess.call(cmd, shell=True)
+											except:
+												print traceback.format_exc()
 
-                                            print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
+										# OR USE THE CERE PROC CLOUD
+										elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
 
+											request = cereproc_engine.service.speakSimple(
+												options.CEREPROCAPIKEY, 
+												options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
+											if request.resultCode == 1:
+												audio_file = urllib.URLopener()
+												audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
 
-                                            output_filename = None
 
-                                            if options.OGGTOWAV:
+											print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
 
-                                                if os.path.exists(wav_file+'.ogg'):
 
-                                                    # convert to wav
+											output_filename = None
 
-                                                    output_filename = wav_file
+											if options.OGGTOWAV:
 
-                                                    convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
+												if os.path.exists(wav_file+'.ogg'):
 
-                                                    try:
-                                                        subprocess.call(convert_cmd, shell=True)
+													# convert to wav
 
-                                                        os.remove(wav_file+'.ogg')
+													output_filename = wav_file
 
-                                                    except:
-                                                        print traceback.format_exc()
-                                                else:
-                                                    print 'Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg'
+													convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
 
-                                            elif options.WAVTOOGG:
+													print '. PROCESSING OGGTOWAV CMD', convert_cmd
 
-                                                if os.path.exists(wav_file):
+													try:
+														subprocess.call(convert_cmd, shell=True)
 
-                                                    # convert to wav
-                                                    # ffmpeg -i audio.wav  -acodec libvorbis audio.ogg
+														os.remove(wav_file+'.ogg')
 
-                                                    output_filename = wav_file+'.ogg'
+													except:
+														print traceback.format_exc()
+												else:
+													print 'Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg'
 
-                                                    convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(wav_file, output_filename)
+											elif options.WAVTOOGG:
 
-                                                    print '. PROCESSING FFMEG CMD WAVTOOGG', convert_cmd
+												if os.path.exists(wav_file):
 
-                                                    try:
-                                                        subprocess.call(convert_cmd, shell=True)
+													# convert to wav
+													# ffmpeg -i audio.wav  -acodec libvorbis audio.ogg
 
-                                                        os.remove(wav_file+'.ogg')
+													output_filename = wav_file+'.ogg'
 
-                                                    except:
-                                                        print traceback.format_exc()
+													convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(wav_file, output_filename)
 
+													print '. PROCESSING FFMEG CMD WAVTOOGG', convert_cmd
 
-                                            print '. CHECKING POST PROCESSING', hasattr(rd, 'post_processing')
-                                            
-                                            # process wav if necessary
-                                            # move to Resources/Audio/Dialog/{robot_name_dir}
-                                            try:
+													try:
+														subprocess.call(convert_cmd, shell=True)
 
-                                                if output_filename.endswith('.wav'):
-                                                    # only post process wavs
+														os.remove(wav_file+'.ogg')
 
-                                                    if hasattr(rd, 'post_processing'):
-                                                        # there is a post process command
+													except:
+														print traceback.format_exc()
 
-                                                        print '. DOING POST PROCESSING'
 
-                                                        for pp in rd.post_processing:
+											print '. CHECKING POST PROCESSING', hasattr(rd, 'post_processing')
+											
+											# process wav if necessary
+											# move to Resources/Audio/Dialog/{robot_name_dir}
+											try:
 
-                                                            post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
+												if output_filename.endswith('.wav'):
+													# only post process wavs
 
-                                                            print '. POST PROCESSING CMD', post_process_cmd
+													if hasattr(rd, 'post_processing'):
+														# there is a post process command
 
-                                                            ret_code = subprocess.call(post_process_cmd, shell=True)
+														print '. DOING POST PROCESSING'
 
-                                                            print '. POST_PROCESSING', ret_code
+														for pp in rd.post_processing:
 
-                                                            # convert back to ogg for unity
+															post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
 
-                                                            input_filename = output_filename + '.wav' # add extra ext that was added by .sh
+															# inset 'win' into cmd
+															# crunchy.sh becomes crunchywin.sh
+															if sys.platform == 'win32':
+																elems = post_process_cmd.split('.sh')
+																elems.insert(1, 'win.sh')
+																post_process_cmd = ''.join(elems)
 
-                                                            print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
+															print '. POST PROCESSING CMD', post_process_cmd
 
-                                                            output_filename = os.path.splitext(wav_file)[0] +'.ogg'
+															ret_code = subprocess.call(post_process_cmd, shell=True)
 
-                                                            convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
+															print '. POST_PROCESSING', ret_code
 
-                                                            print '. PROCESSING FFMEG CMD', convert_cmd
+															# convert back to ogg for unity
 
-                                                            try:
-                                                                subprocess.call(convert_cmd, shell=True)
+															input_filename = output_filename + '.wav' # add extra ext that was added by .sh
 
-                                                                # move file to resources
-                                                                    
-                                                                audio_resource_robot_audio_dir = \
-                                                                    os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
+															print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
 
-                                                                try:
-                                                                    os.makedirs(audio_resource_robot_audio_dir)
-                                                                except:
-                                                                    pass
+															output_filename = os.path.splitext(wav_file)[0] +'.ogg'
 
-                                                                audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
+															convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
 
-                                                                shutil.copy(output_filename, audio_resource_robot_audio_file)
+															print '. PROCESSING FFMEG CMD', convert_cmd
 
-                                                                new_filesz = os.stat(audio_resource_robot_audio_file).st_size
+															try:
+																subprocess.call(convert_cmd, shell=True)
 
-                                                                print '. COPIED', new_filesz, audio_resource_robot_audio_file
+																# move file to resources
+																	
+																audio_resource_robot_audio_dir = \
+																	os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
 
-                                                                os.remove(input_filename)
-                                                                os.remove(output_filename)
+																try:
+																	os.makedirs(audio_resource_robot_audio_dir)
+																except:
+																	pass
 
-                                                            except:
-                                                                print traceback.format_exc()
+																audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
 
-                                            except:
-                                                print traceback.format_exc()
+																shutil.copy(output_filename, audio_resource_robot_audio_file)
 
-                                    else:
+																new_filesz = os.stat(audio_resource_robot_audio_file).st_size
 
-                                        print '. AUDIO', x
+																print '. COPIED', new_filesz, audio_resource_robot_audio_file
 
-                                else:
-                                    result[robot_name]['question_answer'][x][lang_code]['audio'] = wav_file
-                                    result[robot_name]['question_answer'][x][lang_code]['use_ext_audio'] = True
+																os.remove(input_filename)
+																os.remove(output_filename)
 
-                                    
-            if hasattr(rd, 'greetings') and rd.greetings != None:
+															except:
+																print traceback.format_exc()
 
-                do_translate_flags = {}
-                try:
-                    g_pos = 0
-                    for greeting in rd.greetings:
-                        if greeting:
-                            for k, v in greeting.items():
-                                if 'greetings' not in regen_block_categories:
-                                    try:
-                                        if master_json[robot_name]['greetings']['en'][g_pos]['txt'] != v['en'] or master_json[robot_name]['greetings']['en'][g_pos]['key'] != k:
-                                            do_translate_flags[k] = True
-                                        else:
-                                            # alse check en_tts pronuctiation options
-                                            if 'en_tts' in v:
-                                                if master_json[robot_name]['greetings']['en'][g_pos]['en_tts'] != v['en_tts']:
-                                                    do_translate_flags[k] = True
-                                            else:
-                                                if 'en_tts' in master_json[robot_name]['greetings']['en'][g_pos] and master_json[robot_name]['greetings']['en'][g_pos]['en_tts'] != None:
-                                                    # it was removed
-                                                    do_translate_flags[k] = True
-                                    except:
-                                        do_translate_flags[k] = True
-                                else:
+											except:
+												print traceback.format_exc()
 
-                                    print '. OVERRIDE REGENERATE', k
-                                    do_translate_flags[k] = True
+									else:
 
-                                g_pos += 1
+										print '. AUDIO', x
 
-                except:
-                    print traceback.format_exc()
+								else:
+									result[robot_name]['question_answer'][x][lang_code]['audio'] = wav_file
+									result[robot_name]['question_answer'][x][lang_code]['use_ext_audio'] = True
 
+									
+			if hasattr(rd, 'greetings') and rd.greetings != None:
 
-                for greeting in rd.greetings:
-                    if greeting:
-                        if greeting:
-                            for k, v in greeting.items():
+				do_translate_flags = {}
+				try:
+					g_pos = 0
+					for greeting in rd.greetings:
+						if greeting:
+							for k, v in greeting.items():
+								if 'greetings' not in regen_block_categories:
 
-                                txt = v['en']
-                                en_tts = v['en_tts'] if 'en_tts' in v else None
+									# force translation because its broken
+									# do_translate_flags[k] = True
 
-                                wav_file = os.path.join(robot_dir,  robot_name + '_' + k + '.wav')
+									try:
+										if master_json[robot_name]['greetings']['en'][g_pos]['txt'] != v['en'] or master_json[robot_name]['greetings']['en'][g_pos]['key'] != k:
+											do_translate_flags[k] = True
 
-                                result.setdefault(robot_name, {}).setdefault('greetings', {}).setdefault('en', []).append(
-                                    {
-                                        'key':k,
-                                        'txt':txt,
-                                        'en_tts':en_tts,
-                                        'audio':os.path.splitext(os.path.basename(wav_file))[0],
-                                        'use_ext_audio':v['use_ext_audio'] if 'use_ext_audio' in v else None
-                                    }
-                                )
+										else:
+											print ". CHECK PRONUCTIATION -", k
+											# alse check en_tts pronuctiation options
+											if 'en_tts' in v:
+												if master_json[robot_name]['greetings']['en'][g_pos]['en_tts'] != v['en_tts']:
+													do_translate_flags[k] = True
 
-                                if k in do_translate_flags:
+											else:
+												if 'en_tts' in master_json[robot_name]['greetings']['en'][g_pos] and master_json[robot_name]['greetings']['en'][g_pos]['en_tts'] != None:
+													# it was removed
+													do_translate_flags[k] = True
 
-                                    print '+ TRANSLATE', k
 
-                                    # translate if needed
-                                    if translate_service:
+											print ". CHECK LANGUAGUES -", k   
+											# check for all languages
+											for t_lang_code in translate_codes:
+												if t_lang_code not in master_json[robot_name]['greetings'] or not master_json[robot_name]['greetings'][t_lang_code]:
+													do_translate_flags[k] = True
+													break
+									except:
+										do_translate_flags[k] = True
 
-                                        for t_lang_code in translate_codes:
-                                            attempts = 0
-                                            while attempts < 3:
-                                                try:
+								else:
 
-                                                    t_res = translate_service.translations().list(
-                                                        source='en',
-                                                        target=t_lang_code,
-                                                        q=[txt]
-                                                    ).execute()
+									print '. OVERRIDE REGENERATE', k
+									do_translate_flags[k] = True
 
-                                                    t_txt = t_res['translations'][0]['translatedText']
+								g_pos += 1
 
-                                                    result[robot_name]['greetings'].setdefault(t_lang_code, []).append(
-                                                        {
-                                                            'key':k,
-                                                            'txt':t_txt,
-                                                            'en_tts':en_tts,
-                                                            'audio':None,
-                                                            'use_ext_audio':v['use_ext_audio'] if 'use_ext_audio' in v else None
-                                                        }
-                                                    )
+				except:
+					print traceback.format_exc()
 
-                                                    attempts = 3
-                                                    time.sleep(.15)
-                                                    break
 
-                                                except:
-                                                    print traceback.format_exc()
-                                                    
-                                                    attempts += 1
-                                                    time.sleep(1*attempts)
-                                    else:
+				for greeting in rd.greetings:
+					if greeting:
+						for k, v in greeting.items():
 
-                                        raise Exception('No translation service enabled')
+							txt = v['en']
+							en_tts = v['en_tts'] if 'en_tts' in v else None
 
-                                else:
+							wav_file = os.path.join(robot_dir,  robot_name + '_' + k + '.wav')
+							audio_for_txt = os.path.splitext(os.path.basename(wav_file))[0]
 
-                                    print '. TRANSLATE', k
+							result.setdefault(robot_name, {}).setdefault('greetings', {}).setdefault('en', []).append(
+								{
+									'key':k,
+									'txt':txt,
+									'en_tts':en_tts,
+									'audio':os.path.splitext(os.path.basename(wav_file))[0],
+									'use_ext_audio':v['use_ext_audio'] if 'use_ext_audio' in v else None
+								}
+							)
 
+							if k in do_translate_flags:
 
-                                wav_file = None
-                                lang_code = 'en' # force it to en
-                                if not options.ONLYENROBOTVOICEGEN or (options.ONLYENROBOTVOICEGEN and lang_code == 'en'):
+								print '+ TRANSLATE GREETING', k
 
-                                    if not 'use_ext_audio' in v or v['use_ext_audio'] == False:
+								# translate if needed
+								if translate_service:
 
-                                        process_audio = k in do_translate_flags
+									for t_lang_code in translate_codes:
+										attempts = 0
+										while attempts < 10:
+											try:
 
-                                        wav_file = os.path.join(robot_dir,  robot_name + '_' + k + '.wav')
-                                        if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
-                                            wav_file = os.path.join(robot_dir, robot_name + '_' + lang_code + '_' + k + '.wav')
+												t_res = translate_service.translations().list(
+													source='en',
+													target=t_lang_code,
+													q=[txt]
+												).execute()
 
-                                        generated_audio_paths.append(wav_file)
+												t_txt = t_res['translations'][0]['translatedText']
+												for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+													t_txt = t_txt.replace(k_, v_)
 
-                                        result[robot_name]['greetings']['en'][-1:][0]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
+												result[robot_name]['greetings'].setdefault(t_lang_code, []).append(
+													{
+														'key':k,
+														'txt':t_txt,
+														'en_tts':en_tts,
+														'audio':audio_for_txt,
+														'use_ext_audio':v['use_ext_audio'] if 'use_ext_audio' in v else None
+													}
+												)
 
-                                        v_txt = txt
-                                        if 'en_tts' in v:
-                                            v_txt = v['en_tts']
+												attempts = 10 # though break should take care of this
+												time.sleep(.15)
+												break
 
+											except:
+												print traceback.format_exc()
+												
+												attempts += 1
+												time.sleep(1*attempts)
+								else:
 
-                                        # override if this block is flagged
-                                        if regen_blocks:
-                                            if robot_name in regen_blocks or 'ALL' in regen_blocks:
-                                                process_audio = True
+									raise Exception('No translation service enabled')
 
+							else:
 
-                                        if process_audio:
+								try:
+									# print '. LISTING PREVIOUS TRANSLATE'
+									# pprint.pprint(result[robot_name]['greetings'])
 
-                                            print '+ AUDIO', k
+									for t_lang_code in translate_codes:
+										try: 
+											result[robot_name]['greetings'][t_lang_code] = master_json[robot_name]['greetings'][t_lang_code]
+										except:
+											print 'WARNING! Missing lang code from master? ', traceback.format_exc()
 
-                                            if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
-                                                try:
-                                                    voice_engine.setProperty('voice', rd.voice)
-                                                    voice_engine.speakToFile(v_txt, wav_file)
-                                                    voice_engine.runAndWait()
-                                                except:
-                                                    print traceback.format_exc()
+								except:
+									pass
 
-                                            elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
+								#sys.exit()
 
-                                                # echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
 
-                                                cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
+							wav_file = None
+							lang_code = 'en' # force it to en
+							if not options.ONLYENROBOTVOICEGEN or (options.ONLYENROBOTVOICEGEN and lang_code == 'en'):
 
-                                                try:
-                                                    subprocess.call(cmd, shell=True)
-                                                except:
-                                                    print traceback.format_exc()
+								if not 'use_ext_audio' in v or v['use_ext_audio'] == False:
 
-                                            # OR USE THE CERE PROC CLOUD
-                                            elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
+									process_audio = k in do_translate_flags
 
-                                                request = cereproc_engine.service.speakSimple(
-                                                    options.CEREPROCAPIKEY, 
-                                                    options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
-                                                if request.resultCode == 1:
-                                                    audio_file = urllib.URLopener()
-                                                    audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
+									wav_file = os.path.join(robot_dir,  robot_name + '_' + k + '.wav')
+									if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
+										wav_file = os.path.join(robot_dir, robot_name + '_' + lang_code + '_' + k + '.wav')
 
+									generated_audio_paths.append(wav_file)
 
-                                                print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
+									result[robot_name]['greetings']['en'][-1:][0]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
 
-                                                output_filename = wav_file
+									v_txt = txt
+									if 'en_tts' in v:
+										v_txt = v['en_tts']
 
-                                                if os.path.exists(wav_file+'.ogg'):
 
-                                                    # convert to wav
+									# TODO: check to see if text has changed
 
-                                                    convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
 
-                                                    try:
-                                                        subprocess.call(convert_cmd, shell=True)
+									# override if this block is flagged
+									if regen_blocks:
+										if robot_name in regen_blocks or 'ALL' in regen_blocks:
+											process_audio = True
 
-                                                        os.remove(wav_file+'.ogg')
 
-                                                    except:
-                                                        print traceback.format_exc()
+									if process_audio:
 
-                                                else:
-                                                    print 'Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg'
+										print '+ AUDIO', k
 
+										if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
+											try:
+												voice_engine.setProperty('voice', rd.voice)
+												voice_engine.speakToFile(v_txt, wav_file)
+												voice_engine.runAndWait()
+											except:
+												print traceback.format_exc()
 
-                                            print '. CONVERTED', os.stat(wav_file).st_size, wav_file
+										elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
 
+											# echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
 
-                                            # process wav if necessary
-                                            # move to Resources/Audio/Dialog/{robot_name_dir}
-                                            try:
+											cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
 
-                                                if output_filename.endswith('.wav'):
-                                                    # only post process wavs
+											try:
+												subprocess.call(cmd, shell=True)
+											except:
+												print traceback.format_exc()
 
-                                                    if hasattr(rd, 'post_processing'):
-                                                        # there is a post process command
+										# OR USE THE CERE PROC CLOUD
+										elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                                        for pp in rd.post_processing:
+											request = cereproc_engine.service.speakSimple(
+												options.CEREPROCAPIKEY, 
+												options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
+											if request.resultCode == 1:
+												audio_file = urllib.URLopener()
+												audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
 
-                                                            post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
 
-                                                            print '. POST PROCESSSING CMD', post_process_cmd
+											print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
 
-                                                            ret_code = subprocess.call(post_process_cmd, shell=True)
+											output_filename = wav_file
 
-                                                            print '. POST_PROCESSING', ret_code
+											if os.path.exists(wav_file+'.ogg'):
 
-                                                            # convert back to ogg for unity
+												# convert to wav
 
-                                                            input_filename = output_filename + '.wav' # add extra ext that was added by .sh
+												convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
 
-                                                            print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
+												try:
+													subprocess.call(convert_cmd, shell=True)
 
-                                                            output_filename = os.path.splitext(wav_file)[0] +'.ogg'
+													os.remove(wav_file+'.ogg')
 
-                                                            convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
+												except:
+													print traceback.format_exc()
 
-                                                            try:
-                                                                subprocess.call(convert_cmd, shell=True)
+											else:
+												print 'Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg'
 
-                                                                # move file to resources
-                                                                    
-                                                                audio_resource_robot_audio_dir = \
-                                                                    os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
 
-                                                                try:
-                                                                    os.makedirs(audio_resource_robot_audio_dir)
-                                                                except:
-                                                                    pass
+										print '. CONVERTED', os.stat(wav_file).st_size, wav_file
 
-                                                                audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
 
-                                                                shutil.copy(output_filename, audio_resource_robot_audio_file)
+										# process wav if necessary
+										# move to Resources/Audio/Dialog/{robot_name_dir}
+										try:
 
-                                                                new_filesz = os.stat(audio_resource_robot_audio_file).st_size
+											if output_filename.endswith('.wav'):
+												# only post process wavs
 
-                                                                print '. COPIED', new_filesz, audio_resource_robot_audio_file
+												if hasattr(rd, 'post_processing'):
+													# there is a post process command
 
-                                                                os.remove(input_filename)
-                                                                os.remove(output_filename)
+													for pp in rd.post_processing:
 
-                                                            except:
-                                                                print traceback.format_exc()
+														post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
 
-                                            except:
-                                                print traceback.format_exc()
+														# inset 'win' into cmd
+														# crunchy.sh becomes crunchywin.sh
+														if sys.platform == 'win32':
+															elems = post_process_cmd.split('.sh')
+															elems.insert(1, 'win.sh')
+															post_process_cmd = ''.join(elems)
 
+														print '. POST PROCESSSING CMD', post_process_cmd
 
-                                        else:
+														ret_code = subprocess.call(post_process_cmd, shell=True)
 
-                                            print '. AUDIO', k
+														print '. POST_PROCESSING', ret_code
 
-                        else:
-                            pass
+														# convert back to ogg for unity
 
-                    else:
-                        break
+														input_filename = output_filename + '.wav' # add extra ext that was added by .sh
 
+														print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
 
+														output_filename = os.path.splitext(wav_file)[0] +'.ogg'
 
-            # TODO: refactor this into funcs to render wavs, etc..
-            
-            if hasattr(rd, 'random') and rd.random != None:
-                for x, t in rd.random.items():
+														convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
 
-                    for lang_code, txt in t.question_text.items():
+														try:
+															subprocess.call(convert_cmd, shell=True)
 
-                        #if not lang_code.endswith('_tts'):
-                        if lang_code == 'en':
+															# move file to resources
+																
+															audio_resource_robot_audio_dir = \
+																os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
 
-                            do_translate = True
+															try:
+																os.makedirs(audio_resource_robot_audio_dir)
+															except:
+																pass
 
-                            a_txt = t.answer_text[lang_code]
+															audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
 
-                            result.setdefault(robot_name, {}).setdefault('random', {}).setdefault(x, {}).setdefault(lang_code, {})['answer_text'] = a_txt
+															shutil.copy(output_filename, audio_resource_robot_audio_file)
 
-                            result[robot_name]['random'][x]['rank'] = t.rank
+															new_filesz = os.stat(audio_resource_robot_audio_file).st_size
 
-                            q_txt = t.question_text[lang_code]
+															print '. COPIED', new_filesz, audio_resource_robot_audio_file
 
-                            result[robot_name]['random'][x][lang_code]['question_text'] = t.question_text[lang_code]
+															os.remove(input_filename)
+															os.remove(output_filename)
 
-                            try:
-                                if master_json[robot_name]['random'][x][lang_code]['question_text'] == q_txt:
-                                    do_translate = False
-                            except:
-                                pass
+														except:
+															print traceback.format_exc()
 
-                            if do_translate:
+										except:
+											print traceback.format_exc()
 
-                                if a_txt != None and q_txt != None:
 
-                                    # translate if needed
-                                    if translate_service and lang_code == 'en':
+									else:
 
-                                        for t_lang_code in translate_codes:
-                                            attempts = 0
-                                            while attempts < 3:
-                                                try:
+										print '. AUDIO FOR GREETING', k
 
-                                                    t_res = translate_service.translations().list(
-                                                        source='en',
-                                                        target=t_lang_code,
-                                                        q=[q_txt, a_txt]
-                                                    ).execute()
+					else:
+						break
+						# it exists but doesn't need translation
 
-                                                    t_q_txt = t_res['translations'][0]['translatedText']
-                                                    t_a_txt = t_res['translations'][1]['translatedText']
+						# result[robot_name]['greetings'] = master_json[robot_name]['greetings']
 
-                                                    result[robot_name]['random'][x].setdefault(t_lang_code, {})['question_text'] = t_q_txt
-                                                    result[robot_name]['random'][x][t_lang_code]['answer_text'] = t_a_txt
 
-                                                    attempts = 3
-                                                    time.sleep(.15)
-                                                    break
+			# TODO: refactor this into funcs to render wavs, etc..
+			
+			if hasattr(rd, 'random') and rd.random != None:
+				for x, t in rd.random.items():
 
-                                                except:
-                                                    print traceback.format_exc()
-                                                    
-                                                    attempts += 1
-                                                    time.sleep(1*attempts)
+					for lang_code, txt in t.question_text.items():
 
-                                else:
-                                    try:
-                                        for t_lang_code in translate_codes:
-                                            result[robot_name]['random'][x].setdefault(t_lang_code, {})
-                                            result[robot_name]['random'][x][t_lang_code]['question_text'] = None
-                                            result[robot_name]['random'][x][t_lang_code]['answer_text'] = None
-                                    except:
-                                        print traceback.format_exc()
-                            else:
-                                try:
-                                    for t_lang_code in translate_codes:
-                                        result[robot_name]['random'][x].setdefault(t_lang_code, {})
-                                        result[robot_name]['random'][x][t_lang_code]['question_text'] = master_json[robot_name]['random'][x][t_lang_code]['question_text']
-                                        result[robot_name]['random'][x][t_lang_code]['answer_text'] = master_json[robot_name]['random'][x][t_lang_code]['answer_text']
-                                except:
-                                    print traceback.format_exc()
+						#if not lang_code.endswith('_tts'):
+						if lang_code == 'en':
 
+							do_translate = True
+							do_audio = False
 
-                            if not options.ONLYENROBOTVOICEGEN or (options.ONLYENROBOTVOICEGEN and lang_code == 'en'):
+							a_txt = t.answer_text[lang_code]
 
-                                wav_file = None
+							result.setdefault(robot_name, {}).setdefault('random', {}).setdefault(x, {}).setdefault(lang_code, {})['answer_text'] = a_txt
 
-                                if not 'use_ext_audio' in t or t['use_ext_audio'] == False:
+							result[robot_name]['random'][x]['rank'] = t.rank
 
-                                    process_audio = True
+							q_txt = t.question_text[lang_code]
 
-                                    wav_file = os.path.join(robot_dir, x + '.wav')
-                                    if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
-                                        wav_file = os.path.join(robot_dir, lang_code + '_' + x + '.wav')
+							result[robot_name]['random'][x][lang_code]['question_text'] = t.question_text[lang_code]
 
-                                    generated_audio_paths.append(wav_file)
+							try:
+								if master_json[robot_name]['random'][x][lang_code]['question_text'] == q_txt:
+									do_translate = False
+							except:
+								print traceback.format_exc()
+								do_translate = True
+								do_audio = True
 
-                                    result[robot_name]['random'][x][lang_code]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
+							try:
+								# check for all requested lang codes
+								for t_lang_code in translate_codes:
+									_ = master_json[robot_name]['random'][x][t_lang_code]['question_text']
+									_ = master_json[robot_name]['random'][x][t_lang_code]['answer_text']
+								do_translate = False
+								print '. ALL TRANSLATION CODES EXIST IN MASTER', str(translate_codes)
+							except:
+								print traceback.format_exc()
+								do_translate = True
+								do_audio = True
 
-                                    try:
-                                        if master_json[robot_name]['random'][x][lang_code]['audio'] == result[robot_name]['random'][x][lang_code]['audio']:
-                                            process_audio = do_translate
-                                    except:
-                                        pass
+							if do_translate:
 
-                                    v_txt = t.answer_text[lang_code]
-                                    if 'en_tts' in t.answer_text:
-                                        v_txt = t.answer_text['en_tts']
+								if a_txt != None and q_txt != None:
 
-                                        result[robot_name]['random'][x].setdefault('pronuctiation', {})['answer_text'] = v_txt
-                                        
-                                        try:
-                                            if master_json[robot_name]['random'][x]['pronuctiation']['answer_text'] != v_txt:
-                                                process_audio = True
-                                        except:
-                                            process_audio = True
+									# translate if needed
+									if translate_service and lang_code == 'en':
 
-                                    # check to see if text has changed
-                                    try:
-                                        if master_json[robot_name]['random'][x]['en']['answer_text'] != t.answer_text[lang_code]:
-                                            process_audio = True
-                                    except:
-                                        print traceback.format_exc()
+										for t_lang_code in translate_codes:
+											attempts = 0
+											while attempts < 10:
+												try:
 
+													t_res = translate_service.translations().list(
+														source='en',
+														target=t_lang_code,
+														q=[q_txt, a_txt]
+													).execute()
 
-                                    # override if this block is flagged
-                                    if regen_blocks:
-                                        if robot_name in regen_blocks or 'ALL' in regen_blocks:
-                                            process_audio = True
+													t_q_txt = t_res['translations'][0]['translatedText']
+													t_a_txt = t_res['translations'][1]['translatedText']
 
+													for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+														t_q_txt = t_q_txt.replace(k_, v_)
+														t_a_txt = t_a_txt.replace(k_, v_)
 
-                                    if process_audio:
+													result[robot_name]['random'][x].setdefault(t_lang_code, {})['question_text'] = t_q_txt
+													result[robot_name]['random'][x][t_lang_code]['answer_text'] = t_a_txt
 
-                                        print '+ AUDIO', x
+													attempts = 10 # though break should take care of this
+													time.sleep(.15)
+													break
 
-                                        if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
-                                            try:
-                                                voice_engine.setProperty('voice', rd.voice)
-                                                voice_engine.speakToFile(v_txt, wav_file)
-                                                voice_engine.runAndWait()
-                                            except:
-                                                print traceback.format_exc()
+												except:
+													print traceback.format_exc()
+													
+													attempts += 1
+													time.sleep(1*attempts)
 
-                                        elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
+								else:
+									try:
+										for t_lang_code in translate_codes:
+											result[robot_name]['random'][x].setdefault(t_lang_code, {})
+											result[robot_name]['random'][x][t_lang_code]['question_text'] = None
+											result[robot_name]['random'][x][t_lang_code]['answer_text'] = None
+									except:
+										print traceback.format_exc()
+							else:
+								print '. NO TRANSLATION PERFORMED', str(translate_codes)
+								try:
+									for t_lang_code in translate_codes:
+										result[robot_name]['random'][x].setdefault(t_lang_code, {})
+										result[robot_name]['random'][x][t_lang_code]['question_text'] = master_json[robot_name]['random'][x][t_lang_code]['question_text']
+										result[robot_name]['random'][x][t_lang_code]['answer_text'] = master_json[robot_name]['random'][x][t_lang_code]['answer_text']
+								except:
+									print traceback.format_exc()
 
-                                            # echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
 
-                                            cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
+							if not options.ONLYENROBOTVOICEGEN or (options.ONLYENROBOTVOICEGEN and lang_code == 'en'):
 
-                                            try:
-                                                subprocess.call(cmd, shell=True)
-                                            except:
-                                                print traceback.format_exc()
+								wav_file = None
 
-                                        # OR USE THE CERE PROC CLOUD
-                                        elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
-                                            
-                                            request = cereproc_engine.service.speakSimple(
-                                                options.CEREPROCAPIKEY, 
-                                                options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
-                                            if request.resultCode == 1:
-                                                audio_file = urllib.URLopener()
-                                                audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
+								if not 'use_ext_audio' in t or t['use_ext_audio'] == False:
 
-                                            print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
+									process_audio = True
 
-                                            output_filename = wav_file
+									wav_file = os.path.join(robot_dir, x + '.wav')
+									if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
+										wav_file = os.path.join(robot_dir, lang_code + '_' + x + '.wav')
 
+									generated_audio_paths.append(wav_file)
 
-                                            if os.path.exists(wav_file+'.ogg'):
+									result[robot_name]['random'][x][lang_code]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
 
-                                                # convert to wav
+									try:
+										if master_json[robot_name]['random'][x][lang_code]['audio'] == result[robot_name]['random'][x][lang_code]['audio']:
+											process_audio = do_audio
+											print 'CHECK THIS OUT'
+											print
+											print master_json[robot_name]['random'][x][lang_code]['audio']
+											print result[robot_name]['random'][x][lang_code]['audio']
+											print 'DO AUDIO ?', do_audio
+									except:
+										print traceback.format_exc()
+										pass
 
-                                                convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
+									v_txt = t.answer_text[lang_code]
+									if 'en_tts' in t.answer_text:
+										v_txt = t.answer_text['en_tts']
 
-                                                try:
-                                                    subprocess.call(convert_cmd, shell=True)
+										result[robot_name]['random'][x].setdefault('pronuctiation', {})['answer_text'] = v_txt
+										
+										try:
+											if master_json[robot_name]['random'][x]['pronuctiation']['answer_text'] != v_txt:
+												process_audio = True
+										except:
+											print traceback.format_exc()
+											process_audio = True
 
-                                                    os.remove(wav_file+'.ogg')
+									# check to see if text has changed
+									try:
+										if master_json[robot_name]['random'][x]['en']['answer_text'] != t.answer_text[lang_code]:
+											process_audio = True
+									except:
+										print traceback.format_exc()
+										process_audio = True
 
-                                                except:
-                                                    print traceback.format_exc()
-                                            else:
-                                                print 'Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg'
 
+									# override if this block is flagged
+									if regen_blocks:
+										if robot_name in regen_blocks or 'ALL' in regen_blocks:
+											process_audio = True
 
-                                            # process wav if necessary
-                                            # move to Resources/Audio/Dialog/{robot_name_dir}
-                                            try:
 
-                                                if output_filename.endswith('.wav'):
-                                                    # only post process wavs
+									if process_audio:
 
-                                                    if hasattr(rd, 'post_processing'):
-                                                        # there is a post process command
+										print '+ AUDIO', x
 
-                                                        for pp in rd.post_processing:
+										if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
+											try:
+												voice_engine.setProperty('voice', rd.voice)
+												voice_engine.speakToFile(v_txt, wav_file)
+												voice_engine.runAndWait()
+											except:
+												print traceback.format_exc()
 
-                                                            # process audio
+										elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                                            post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
+											# echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
 
-                                                            print '. POST PROCESSING CMD', post_process_cmd
+											cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
 
-                                                            ret_code = subprocess.call(post_process_cmd, shell=True)
+											try:
+												subprocess.call(cmd, shell=True)
+											except:
+												print traceback.format_exc()
 
-                                                            print '. POST PROCESSING', ret_code
+										# OR USE THE CERE PROC CLOUD
+										elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
+											
+											request = cereproc_engine.service.speakSimple(
+												options.CEREPROCAPIKEY, 
+												options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
+											if request.resultCode == 1:
+												audio_file = urllib.URLopener()
+												audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
 
+											output_filename = wav_file
 
-                                                            # convert back to ogg for unity
+											if os.path.exists(wav_file+'.ogg'):
 
-                                                            input_filename = output_filename + '.wav' # add extra ext that was added by .sh
+												print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
 
-                                                            output_filename = os.path.splitext(wav_file)[0] +'.ogg'
+												# convert to wav
 
-                                                            convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
+												convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
 
-                                                            try:
-                                                                subprocess.call(convert_cmd, shell=True)
-                                                                
+												try:
+													subprocess.call(convert_cmd, shell=True)
 
-                                                                # convert back to ogg for unity
+													os.remove(wav_file+'.ogg')
 
-                                                                input_filename = output_filename
+												except:
+													print traceback.format_exc()
+											else:
+												raise Exception('Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg')
 
-                                                                print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
 
-                                                                output_filename = os.path.splitext(wav_file)[0]+'.ogg'
+											# process wav if necessary
+											# move to Resources/Audio/Dialog/{robot_name_dir}
+											try:
 
-                                                                convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
+												if output_filename.endswith('.wav'):
+													# only post process wavs
 
-                                                                try:
-                                                                    subprocess.call(convert_cmd, shell=True)
+													if hasattr(rd, 'post_processing'):
+														# there is a post process command
 
-                                                                    # move file to resources
-                                                                        
-                                                                    audio_resource_robot_audio_dir = \
-                                                                        os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
+														for pp in rd.post_processing:
 
-                                                                    try:
-                                                                        os.makedirs(audio_resource_robot_audio_dir)
-                                                                    except:
-                                                                        pass
+															# process audio
 
-                                                                    audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
+															post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
 
-                                                                    shutil.copy(output_filename, audio_resource_robot_audio_file)
+															# inset 'win' into cmd
+															# crunchy.sh becomes crunchywin.sh
+															if sys.platform == 'win32':
+																elems = post_process_cmd.split('.sh')
+																elems.insert(1, 'win.sh')
+																post_process_cmd = ''.join(elems)
 
-                                                                    new_filesz = os.stat(audio_resource_robot_audio_file).st_size
+															print '. POST PROCESSING CMD', post_process_cmd
 
-                                                                    print '. COPIED', new_filesz, audio_resource_robot_audio_file
+															ret_code = subprocess.call(post_process_cmd, shell=True)
 
-                                                                    os.remove(input_filename)
-                                                                    os.remove(output_filename)
+															print '. POST PROCESSING', ret_code
 
-                                                                except:
-                                                                    print traceback.format_exc()
 
-                                                            except:
-                                                                print traceback.format_exc()
+															# convert back to ogg for unity
 
+															input_filename = output_filename + '.wav' # add extra ext that was added by .sh
 
-                                            except:
-                                                print traceback.format_exc()
+															output_filename = os.path.splitext(wav_file)[0] +'.ogg'
 
+															convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
 
-                                    else:
+															try:
+																subprocess.call(convert_cmd, shell=True)
+																
 
-                                        print '. AUDIO', x
+																# convert back to ogg for unity
 
-                                else:
-                                    result[robot_name]['random'][x][lang_code]['audio'] = wav_file
-                                    result[robot_name]['random'][x][lang_code]['use_ext_audio'] = True
+																# input_filename = output_filename
 
+																print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
 
+																output_filename = os.path.splitext(wav_file)[0]+'.ogg'
 
-            if hasattr(rd, 'statements'):
+																convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
 
-                print 'Processing statements for ', robot_name
+																print '. FFMPEG WAVTOOGG CMD', convert_cmd
 
-                for x, t in rd.statements.items():
+																try:
+																	subprocess.call(convert_cmd, shell=True)
 
-                    result.setdefault(robot_name, {}).setdefault('statements', {}).setdefault(x, {})['en'] = t['en']
+																	# move file to resources
+																		
+																	audio_resource_robot_audio_dir = \
+																		os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
 
-                    do_translate = True
-                    try:
-                        if master_json[robot_name]['statements'][x]['en'] == result[robot_name]['statements'][x]['en']:
-                            do_translate = False
-                    except:
-                        pass
+																	try:
+																		os.makedirs(audio_resource_robot_audio_dir)
+																	except:
+																		pass
 
-                    if do_translate:
+																	audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
 
-                        if t['en'] != None:
-                            # translate if needed
-                            if translate_service:
+																	shutil.copy(output_filename, audio_resource_robot_audio_file)
 
-                                print '+ TRANSLATE', x
+																	new_filesz = os.stat(audio_resource_robot_audio_file).st_size
 
-                                for t_lang_code in translate_codes:
-                                    attempts = 0
-                                    while attempts < 3:
-                                        try:
-                                            t_res = translate_service.translations().list(
-                                                source='en',
-                                                target=t_lang_code,
-                                                q=[t['en']]
-                                            ).execute()
+																	print '. COPIED', new_filesz, audio_resource_robot_audio_file
 
-                                            t_txt = t_res['translations'][0]['translatedText']
+																	os.remove(input_filename)
+																	# os.remove(output_filename)
 
-                                            result[robot_name]['statements'][x][t_lang_code] = t_txt
+																except:
+																	print traceback.format_exc()
 
-                                            attempts = 3
-                                            time.sleep(.5)
-                                            break
+															except:
+																print traceback.format_exc()
 
-                                        except:
-                                            print traceback.format_exc()
-                                            
-                                            attempts += 1
-                                            time.sleep(1*attempts)
 
-                        else:
-                            for t_lang_code in translate_codes:
-                                result[robot_name]['statements'][x][t_lang_code] = None
-                    else:
+											except:
+												print traceback.format_exc()
+												raise Exception(". ERROR IN PROCESSING")
 
-                        print '. TRANSLATE', x
 
-                        try:
-                            for t_lang_code in translate_codes:
-                                result[robot_name]['statements'][x][t_lang_code] = master_json[robot_name]['statements'][x][t_lang_code]
-                        except:
-                            pass
+									else:
 
-                    wav_file = None
+										print '. AUDIO', x
 
-                    if not 'use_ext_audio' in t or t['use_ext_audio'] == False:
+								else:
+									result[robot_name]['random'][x][lang_code]['audio'] = wav_file
+									result[robot_name]['random'][x][lang_code]['use_ext_audio'] = True
 
-                        process_audio = True
 
-                        wav_file = os.path.join(robot_dir, x + '.wav')
 
-                        generated_audio_paths.append(wav_file)
-                        
-                        lang_code = 'en' # force this
+			if hasattr(rd, 'statements'):
 
-                        if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
-                            wav_file = os.path.join(robot_dir, lang_code + '_' + x + '.wav')
+				print 'Processing statements for ', robot_name
 
-                        result[robot_name]['statements'][x]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
+				for x, t in rd.statements.items():
 
-                        try:
-                            if master_json[robot_name]['statements'][x]['audio'] == result[robot_name]['statements'][x]['audio']:
-                                process_audio = do_translate
-                        except:
-                            pass
+					result.setdefault(robot_name, {}).setdefault('statements', {}).setdefault(x, {})['en'] = t['en']
 
+					do_translate = True
+					do_audio = True
 
-                        v_txt = t['en']
-                        if 'en_tts' in t:
-                            v_txt = t['en_tts']
+					try:
+						if master_json[robot_name]['statements'][x]['en'] == result[robot_name]['statements'][x]['en']:
+							do_translate = False
+							do_audio = False
+					except:
+						do_translate = True
 
-                            result[robot_name]['statements'][x].setdefault('pronuctiation', v_txt)
-                            try:
-                                if master_json[robot_name]['statements'][x]['pronuctiation'] != v_txt:
-                                    process_audio = True
-                            except:
-                                process_audio = True
+					try:
+						# check for all requested lang codes
+						for t_lang_code in translate_codes:
+							_ = master_json[robot_name]['statements'][x][t_lang_code]
+						do_translate = False
+					except:
+						do_translate = True
 
-                        # check to see if text has changed
-                        try:
-                            if master_json[robot_name]['statements'][x]['en'] != t['en']:
-                                process_audio = True
-                        except:
-                            print traceback.format_exc()
+					if do_translate:
 
+						if t['en'] != None:
+							# translate if needed
+							if translate_service:
 
-                        # override if this block is flagged
-                        if regen_blocks:
-                            if robot_name in regen_blocks or 'ALL' in regen_blocks:
-                                process_audio = True
+								print '+ TRANSLATE', x
 
+								for t_lang_code in translate_codes:
+									attempts = 0
+									while attempts < 10:
+										try:
+											t_res = translate_service.translations().list(
+												source='en',
+												target=t_lang_code,
+												q=[t['en']]
+											).execute()
 
-                        if process_audio:
+											t_txt = t_res['translations'][0]['translatedText']
 
-                            print '+ AUDIO', x
+											for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+												t_txt = t_txt.replace(k_, v_)
 
-                            if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
+											result[robot_name]['statements'][x][t_lang_code] = t_txt
 
-                                try:
-                                    voice_engine.setProperty('voice', rd.voice)
-                                    voice_engine.speakToFile(v_txt, wav_file)
-                                    voice_engine.runAndWait()
-                                except:
-                                    print traceback.format_exc()
+											attempts = 10 # though break should take care of this
+											time.sleep(.5)
+											break
 
-                            elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
+										except:
+											print traceback.format_exc()
+											
+											attempts += 1
+											time.sleep(1*attempts)
 
-                                # echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
+						else:
+							for t_lang_code in translate_codes:
+								result[robot_name]['statements'][x][t_lang_code] = None
+					else:
 
-                                cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
+						print '. TRANSLATE', x
 
-                                try:
-                                    subprocess.call(cmd, shell=True)
-                                except:
-                                    print traceback.format_exc()
+						try:
+							for t_lang_code in translate_codes:
+								result[robot_name]['statements'][x][t_lang_code] = master_json[robot_name]['statements'][x][t_lang_code]
+						except:
+							pass
 
+					wav_file = None
 
-                            # OR USE THE CERE PROC CLOUD
-                            elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
+					if not 'use_ext_audio' in t or t['use_ext_audio'] == False:
 
-                                request = cereproc_engine.service.speakSimple(
-                                    options.CEREPROCAPIKEY, 
-                                    options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
-                                if request.resultCode == 1:
-                                    audio_file = urllib.URLopener()
-                                    audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
+						process_audio = do_audio
 
+						wav_file = os.path.join(robot_dir, x + '.wav')
 
-                                print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
+						generated_audio_paths.append(wav_file)
+						
+						lang_code = 'en' # force this
 
-                                output_filename = wav_file
+						if lang_code != 'en' and not options.ONLYENROBOTVOICEGEN:
+							wav_file = os.path.join(robot_dir, lang_code + '_' + x + '.wav')
 
+						result[robot_name]['statements'][x]['audio'] = os.path.splitext(os.path.basename(wav_file))[0]
 
-                                if os.path.exists(wav_file+'.ogg'):
+						try:
+							if master_json[robot_name]['statements'][x]['audio'] == result[robot_name]['statements'][x]['audio']:
+								process_audio = do_translate
+						except:
+							pass
 
-                                    # convert to wav
 
-                                    convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
+						v_txt = t['en']
+						if 'en_tts' in t:
+							v_txt = t['en_tts']
 
-                                    try:
-                                        subprocess.call(convert_cmd, shell=True)
+							result[robot_name]['statements'][x].setdefault('pronuctiation', v_txt)
+							try:
+								if master_json[robot_name]['statements'][x]['pronuctiation'] != v_txt:
+									process_audio = True
+							except:
+								process_audio = True
 
-                                        os.remove(wav_file+'.ogg')
+						# check to see if text has changed
+						try:
+							if master_json[robot_name]['statements'][x]['en'] != t['en']:
+								process_audio = True
+						except:
+							print traceback.format_exc()
 
-                                    except:
-                                        print traceback.format_exc()
 
-                                else:
-                                    print 'Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg'
+						# override if this block is flagged
+						if regen_blocks:
+							if robot_name in regen_blocks or 'ALL' in regen_blocks:
+								process_audio = True
 
 
+						if process_audio:
 
-                                # process wav if necessary
-                                # move to Resources/Audio/Dialog/{robot_name_dir}
-                                try:
+							print '+ AUDIO', x
 
-                                    if output_filename.endswith('.wav'):
-                                        # only post process wavs
+							if rd.tts == 'nsss' and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                        if hasattr(rd, 'post_processing'):
-                                            # there is a post process command
+								try:
+									voice_engine.setProperty('voice', rd.voice)
+									voice_engine.speakToFile(v_txt, wav_file)
+									voice_engine.runAndWait()
+								except:
+									print traceback.format_exc()
 
-                                            for pp in rd.post_processing:
+							elif rd.tts == 'festival' and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                                post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
+								# echo "This is a test" | ./text2wave -o output.wav -eval "(voice_rab_diphone)"
 
-                                                print '. POST PROCESSING CMD', post_process_cmd
+								cmd = 'echo ' + '"' + v_txt +  '"' + ' | text2wave -o ' + wav_file + ' -eval "(%s)"'%rd.voice
 
-                                                ret_code = subprocess.call(post_process_cmd, shell=True)
+								try:
+									subprocess.call(cmd, shell=True)
+								except:
+									print traceback.format_exc()
 
-                                                print '. POST_PROCESSING', ret_code
 
+							# OR USE THE CERE PROC CLOUD
+							elif rd.tts == 'cereproc' and cereproc_engine and (not only_pdks or (only_pdks and x in only_pdks)):
 
-                                                # convert back to ogg for unity
+								request = cereproc_engine.service.speakSimple(
+									options.CEREPROCAPIKEY, 
+									options.CEREPROCAPIPSSWRD, rd.voice, v_txt)
+								if request.resultCode == 1:
+									audio_file = urllib.URLopener()
+									audio_file.retrieve(request.fileUrl, wav_file+'.ogg')
 
-                                                input_filename = output_filename + '.wav' # add extra ext that was added by .sh
 
-                                                print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
+								print '. DOWNLOADED', os.stat(wav_file+'.ogg').st_size, wav_file+'.ogg'
 
-                                                output_filename = os.path.splitext(wav_file)[0] +'.ogg'
+								output_filename = wav_file
 
-                                                convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
 
-                                                print '. CONVERT CMD', convert_cmd
+								if os.path.exists(wav_file+'.ogg'):
 
-                                                try:
-                                                    subprocess.call(convert_cmd, shell=True)
+									# convert to wav
 
-                                                    # move file to resources
-                                                        
-                                                    audio_resource_robot_audio_dir = \
-                                                        os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
+									convert_cmd = 'ffmpeg -y -i "%s" "%s"'%(wav_file+'.ogg', wav_file)
 
-                                                    try:
-                                                        os.makedirs(audio_resource_robot_audio_dir)
-                                                    except:
-                                                        pass
+									try:
+										subprocess.call(convert_cmd, shell=True)
 
-                                                    audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
+										os.remove(wav_file+'.ogg')
 
-                                                    shutil.copy(output_filename, audio_resource_robot_audio_file)
+									except:
+										print traceback.format_exc()
 
-                                                    new_filesz = os.stat(audio_resource_robot_audio_file).st_size
+								else:
+									print 'Expected OGG output file %s from Cereproc Engine'%wav_file+'.ogg'
 
-                                                    print '. COPIED', new_filesz, audio_resource_robot_audio_file
 
-                                                    os.remove(input_filename)
-                                                    os.remove(output_filename)
 
-                                                except:
-                                                    print traceback.format_exc()
+								# process wav if necessary
+								# move to Resources/Audio/Dialog/{robot_name_dir}
+								try:
 
-                                except:
-                                    print traceback.format_exc()
+									if output_filename.endswith('.wav'):
+										# only post process wavs
 
+										if hasattr(rd, 'post_processing'):
+											# there is a post process command
 
-                        else:
-                            print '. AUDIO', x
+											for pp in rd.post_processing:
 
-                    else:
-                        result[robot_name]['statements'][x]['audio'] = wav_file
-                        result[robot_name]['statements'][x]['use_ext_audio'] = True
+												post_process_cmd = pp.replace('${INPUTFILE}', wav_file).replace('${OUTPUTFILE}', output_filename)
 
+												# inset 'win' into cmd
+												# crunchy.sh becomes crunchywin.sh
+												if sys.platform == 'win32':
+													elems = post_process_cmd.split('.sh')
+													elems.insert(1, 'win.sh')
+													post_process_cmd = ''.join(elems)
 
+												print '. POST PROCESSING CMD', post_process_cmd
 
+												ret_code = subprocess.call(post_process_cmd, shell=True)
 
-            # remove audio files that are no longer referenced
-            try:
-                files = [os.path.join(robot_dir, f) for f in os.listdir(robot_dir) if os.path.isfile(os.path.join(robot_dir, f))]
-                for fck in files:
-                    if fck not in generated_audio_paths:
-                        try:
-                            if os.path.exists(fck):
-                                os.remove(fck)
-                                print '- AUDIO', fck
-                        except:
-                            print 'Error removing unreferenced audio file', traceback.format_exc()
-            except:
-                print traceback.format_exc()
+												print '. POST_PROCESSING', ret_code
 
 
+												# convert back to ogg for unity
 
-        if translate_codes and translate_service:
-            # translated, create lang files
+												input_filename = output_filename + '.wav' # add extra ext that was added by .sh
 
-            if 'en' not in translate_codes:
-                translate_codes.append('en')
+												print '. FILESIZE FOR PROCESSING', os.stat(input_filename).st_size, input_filename
 
-            for t_lang_code in translate_codes:
+												output_filename = os.path.splitext(wav_file)[0] +'.ogg'
 
-                t_lang_result = {}
+												convert_cmd = 'ffmpeg -y -i "%s" -acodec libvorbis "%s"'%(input_filename, output_filename)
 
-                for k,v in result.items():
-                    if 'statements' in v.keys():
-                        t_lang_result.setdefault(k, {}).setdefault('statements', {})
-                        for s_k, s_v in v['statements'].items():
-                            t_lang_result[k].setdefault('statements', {}).setdefault(s_k, {})[t_lang_code] = result[k]['statements'][s_k][t_lang_code]
+												print '. CONVERT CMD', convert_cmd
 
-                            try:
-                                t_lang_result[k]['statements'][s_k]['audio'] = result[k]['statements'][s_k]['audio']
-                            except:
-                                print '.... NO AUDIO', k, t_lang_result[k]['statements'][s_k]
-                    
-                    if 'random' in v.keys():
-                        t_lang_result.setdefault(k, {}).setdefault('random', {})
-                        for s_k, s_v in v['random'].items():
-                            t_lang_result[k]['random'].setdefault(s_k, {})['question_text'] = result[k]['random'][s_k][t_lang_code]['question_text']
-                            t_lang_result[k]['random'][s_k]['answer_text'] = result[k]['random'][s_k][t_lang_code]['answer_text']
-                            t_lang_result[k]['random'][s_k]['rank'] = result[k]['random'][s_k]['rank']
+												try:
+													subprocess.call(convert_cmd, shell=True)
 
-                            try:
-                                t_lang_result[k]['random'][s_k]['audio'] = result[k]['random'][s_k]['en']['audio']
-                            except:
-                                print '.... NO AUDIO', k, t_lang_result[k]['random'][s_k]
+													# move file to resources
+														
+													audio_resource_robot_audio_dir = \
+														os.path.join('../Assets/Resources/Audio/Dialogue', robot_name)
 
-                    if 'question_answer' in v.keys():
-                        t_lang_result.setdefault(k, {}).setdefault('question_answer', {})
-                        for s_k, s_v in v['question_answer'].items():
+													try:
+														os.makedirs(audio_resource_robot_audio_dir)
+													except:
+														pass
 
-                            try: 
-                                t_lang_result[k]['question_answer'].setdefault(s_k, {})['question_text'] = result[k]['question_answer'][s_k][t_lang_code]['question_text']
-                                t_lang_result[k]['question_answer'][s_k]['answer_text'] = result[k]['question_answer'][s_k][t_lang_code]['answer_text']
-                                t_lang_result[k]['question_answer'][s_k]['rank'] = result[k]['question_answer'][s_k]['rank']
-                            except:
-                                print 'Missing Language code?', result[k]['question_answer'][s_k]
+													audio_resource_robot_audio_file = os.path.join(audio_resource_robot_audio_dir, os.path.basename(output_filename))
 
-                            try:
-                                t_lang_result[k]['question_answer'][s_k]['audio'] = result[k]['question_answer'][s_k]['en']['audio']
-                            except:
-                                print '.... NO AUDIO', k, t_lang_result[k]['question_answer'][s_k]
+													shutil.copy(output_filename, audio_resource_robot_audio_file)
 
-                    if 'greetings' in v.keys():
-                        t_lang_result.setdefault(k, {}).setdefault('greetings', [])
-                        for lang_code, greetings in result[k]['greetings'].items():
-                            if lang_code == t_lang_code:
-                                for greeting in greetings:
-                                    t_lang_result[k]['greetings'].append(greeting)
+													new_filesz = os.stat(audio_resource_robot_audio_file).st_size
 
+													print '. COPIED', new_filesz, audio_resource_robot_audio_file
 
-                t_json_data = json.dumps(t_lang_result)
-                if not options.FLIGHTTEST:
-                    try:
-                        print '. WRITING OUTPUT', t_lang_code + '_robotspeech.json'
-                        with open(t_lang_code + '_robotspeech.json', 'w') as of:
-                            of.write(t_json_data)
-                        if options.OUTPUTDEST:
-                            f = t_lang_code + '_robotspeech.json'
-                            mf = os.path.join(options.OUTPUTDEST, f)
-                            shutil.copy2(f, mf)
-                    except:
-                        pass
+													os.remove(input_filename)
+													os.remove(output_filename)
 
+												except:
+													print traceback.format_exc()
 
-        json_data = json.dumps(result)
-        if not options.FLIGHTTEST:
-            try:
-                with open('master_robotspeech.json', 'w') as of:
-                    of.write(json_data)
-            except:
-                pass
+								except:
+									print traceback.format_exc()
 
 
-    # LOCALIZE STATEMENTS
-    if options.LOCALIZE:
+						else:
+							print '. AUDIO', x
 
-        translate_codes = []
-        translate_service = None
-        if options.TRANSLATE:
-            translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
-            for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
-                translate_codes.append(lang_code.strip().lstrip())
+					else:
+						result[robot_name]['statements'][x]['audio'] = wav_file
+						result[robot_name]['statements'][x]['use_ext_audio'] = True
 
-        to_localize = get_localize(lex)
-        to_localize = dict([(_, block,) for _, block in to_localize.items() if block.is_('statement')])
 
-        if to_localize:
 
-            print '.LOCALIZE', to_localize
 
-            result = {}
-            master_json = None
-            master_fp = os.path.join(__here__, './master_localized.json')
-            master_pfp = os.path.join(__here__, 'master_localized.json.bk')
-            if os.path.exists(master_fp):
-                with open(master_fp, 'r') as f:
-                    master_data = f.read()
-                    if master_data:
-                        master_json = json.loads(master_data)
-                        print 'Loaded Master JSON', master_json.keys()
+			# remove audio files that are no longer referenced
+			try:
+				files = [os.path.join(robot_dir, f) for f in os.listdir(robot_dir) if os.path.isfile(os.path.join(robot_dir, f))]
+				for fck in files:
+					if fck not in generated_audio_paths:
+						try:
+							if os.path.exists(fck):
+								os.remove(fck)
+								print '- AUDIO', fck
+						except:
+							print 'Error removing unreferenced audio file', traceback.format_exc()
+			except:
+				print traceback.format_exc()
 
-            for block_name, rd in to_localize.items():
 
-                # block_dir =  os.path.join(__here__, block_name)
-                # try:
-                #     os.makedirs(block_dir)
-                # except:
-                #     pass
 
-                if hasattr(rd, 'statements'):
+		if translate_codes and translate_service:
+			# translated, create lang files
 
-                    for x, t in rd.statements.items():
+			print '. TRANSLATION CODES', translate_codes
 
-                        print 'STATEMENT', t.keys()
+			if 'en' not in translate_codes:
+				translate_codes.append('en')
 
-                        do_translate = False
+			for t_lang_code in translate_codes:
 
-                        result.setdefault(block_name, {}).setdefault('statements', {}).setdefault(x, {})['en'] = t['en']
+				t_lang_result = {}
 
-                        try:
+				for k,v in result.items():
+					if 'statements' in v.keys():
+						t_lang_result.setdefault(k, {}).setdefault('statements', {})
+						for s_k, s_v in v['statements'].items():
+							t_lang_result[k].setdefault('statements', {}).setdefault(s_k, {})[t_lang_code] = result[k]['statements'][s_k][t_lang_code]
 
-                            for t_lang_code in translate_codes:
-                                if x in master_json[block_name]['statements']:
-                                    if t_lang_code not in master_json[block_name]['statements'][x]:
-                                        do_translate = True
-                                        break
-                                else:
-                                    do_translate = True
-                                    break
+							try:
+								t_lang_result[k]['statements'][s_k]['audio'] = result[k]['statements'][s_k]['audio']
+							except:
+								print '.... NO AUDIO', k, t_lang_result[k]['statements'][s_k]
+					
+					if 'random' in v.keys():
+						t_lang_result.setdefault(k, {}).setdefault('random', {})
+						for s_k, s_v in v['random'].items():
+							t_lang_result[k]['random'].setdefault(s_k, {})['question_text'] = result[k]['random'][s_k][t_lang_code]['question_text']
+							t_lang_result[k]['random'][s_k]['answer_text'] = result[k]['random'][s_k][t_lang_code]['answer_text']
+							t_lang_result[k]['random'][s_k]['rank'] = result[k]['random'][s_k]['rank']
 
-                            # now check to see if value changed
-                            if x in master_json[block_name]['statements']:
-                                if master_json[block_name]['statements'][x]['en'] != t['en']:
-                                    do_translate = True
+							try:
+								t_lang_result[k]['random'][s_k]['audio'] = result[k]['random'][s_k]['en']['audio']
+							except:
+								print '.... NO AUDIO', k, t_lang_result[k]['random'][s_k]
 
-                                if 'en_tts' in t:
-                                    if master_json[block_name]['statements'][x]['en_tts'] != t['en_tts']:
-                                        do_translate = True
-                                        
-                            else:
-                                do_translate = True
+					if 'question_answer' in v.keys():
+						t_lang_result.setdefault(k, {}).setdefault('question_answer', {})
+						for s_k, s_v in v['question_answer'].items():
 
-                        except:
-                            print traceback.format_exc()
-                            do_translate = True
+							try: 
+								t_lang_result[k]['question_answer'].setdefault(s_k, {})['question_text'] = result[k]['question_answer'][s_k][t_lang_code]['question_text']
+								t_lang_result[k]['question_answer'][s_k]['answer_text'] = result[k]['question_answer'][s_k][t_lang_code]['answer_text']
+								t_lang_result[k]['question_answer'][s_k]['rank'] = result[k]['question_answer'][s_k]['rank']
+							except:
+								print 'Missing Language code?', result[k]['question_answer'][s_k]
 
-                        if do_translate:
+							try:
+								t_lang_result[k]['question_answer'][s_k]['audio'] = result[k]['question_answer'][s_k]['en']['audio']
+							except:
+								print '.... NO AUDIO', k, t_lang_result[k]['question_answer'][s_k]
 
-                            print '+ TRANSLATE', x
+					if 'greetings' in v.keys():
+						t_lang_result.setdefault(k, {}).setdefault('greetings', [])
+						for lang_code, greetings in result[k]['greetings'].items():
+							if lang_code == t_lang_code:
+								for greeting in greetings:
+									t_lang_result[k]['greetings'].append(greeting)
 
-                            if t['en'] != None:
 
-                                # translate if needed
-                                if translate_service:
+				t_json_data = json.dumps(t_lang_result)
+				if not options.FLIGHTTEST:
+					try:
+						print '. WRITING OUTPUT', t_lang_code + '_robotspeech.json'
+						with open(t_lang_code + '_robotspeech.json', 'w') as of:
+							of.write(t_json_data)
+						if options.OUTPUTDEST:
+							f = t_lang_code + '_robotspeech.json'
+							mf = os.path.join(options.OUTPUTDEST, f)
+							shutil.copy2(f, mf)
+					except:
+						pass
 
-                                    for t_lang_code in translate_codes:
 
-                                        attempts = 0
-                                        while attempts < 3:
-                                            try:
+		json_data = json.dumps(result)
+		if not options.FLIGHTTEST:
+			try:
+				with open('master_robotspeech.json', 'w') as of:
+					of.write(json_data)
+			except:
+				pass
 
-                                                t_res = translate_service.translations().list(
-                                                    source='en',
-                                                    target=t_lang_code,
-                                                    q=[t['en']]
-                                                ).execute()
 
-                                                t_txt = t_res['translations'][0]['translatedText']
+	
 
-                                                result[block_name]['statements'][x][t_lang_code] = t_txt
 
-                                                attempts = 3
-                                                time.sleep(.1)
-                                                break
+	# LOCALIZE STATEMENTS
+	if options.LOCALIZE:
 
+		translate_codes = []
+		translate_service = None
+		if options.TRANSLATE:
+			translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
+			for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
+				translate_codes.append(lang_code.strip().lstrip())
 
-                                            except:
-                                                print traceback.format_exc()
-                                                
-                                                time.sleep(1)
-                                                attempts += 1
+		print '. LOADED TRANSLATION CODES', translate_codes
 
-                                else:
-                                    raise Exception('Localizing statements require a translation service running')
+		to_localize = get_localize(lex)
+		to_localize = dict([(_, block,) for _, block in to_localize.items() if block.is_('statement')])
 
-                            else:
-                                for t_lang_code in translate_codes:
-                                    result[block_name]['statements'][x][t_lang_code] = None
+		master_filename_key = os.path.splitext(options.DIALOGFILE)[0]
 
-                        else:
+		if to_localize:
 
-                            print '. TRANSLATE', x
+			print '.LOCALIZE', to_localize
 
-                            for t_lang_code in translate_codes:
-                                result[block_name]['statements'][x][t_lang_code] = master_json[block_name]['statements'][x][t_lang_code]
+			result = {}
+			master_json = None
+			master_fp = 'master_' + options.OUTPUTFILE
+			master_pfp = 'master_' + options.OUTPUTFILE + '.bk'
+			if os.path.exists(master_fp):
+				with open(master_fp, 'r') as f:
+					master_data = f.read()
+					if master_data:
+						master_json = json.loads(master_data)
+						print 'Loaded Master JSON', master_json.keys()
 
+			for block_name, rd in to_localize.items():
 
+				# block_dir =  os.path.join(__here__, block_name)
+				# try:
+				#     os.makedirs(block_dir)
+				# except:
+				#     pass
 
-            if translate_codes and translate_service:
-                # translated, create lang files
+				if hasattr(rd, 'statements'):
 
-                if 'en' not in translate_codes:
-                    translate_codes.append('en')
+					for x, t in rd.statements.items():
 
-                for t_lang_code in translate_codes:
+						print 'STATEMENT', t.keys()
 
-                    t_lang_result = {}
+						do_translate = False
 
-                    for k,v in result.items():
+						result.setdefault(block_name, {}).setdefault('statements', {}).setdefault(x, {})['en'] = t['en']
 
-                        if 'statements' in v.keys():
-                            t_lang_result.setdefault(k, {}).setdefault('statements', {})
-                            for s_k, s_v in v['statements'].items():
-                                try:
-                                    t_lang_result[k].setdefault('statements', {})[s_k] = result[k]['statements'][s_k][t_lang_code]
-                                except:
-                                    print 'EXCEPTION. HALTING'
-                                    print traceback.format_exc()
-                                    print result[k]['statements'][s_k]
-                                    raise
+						if block.is_("character") and 'actor' in t:
+							result[block_name]['statements'][x]['actor'] = t['actor']
 
+						try:
+							for t_lang_code in translate_codes:
+								if x in master_json[block_name]['statements']:
+									if t_lang_code not in master_json[block_name]['statements'][x]:
+										do_translate = True
+										break
+								else:
+									do_translate = True
+									break
 
-                                try:
-                                    t_lang_result[k]['statements'][s_k]['audio'] = result[k]['statements'][s_k]['en']['audio']
-                                except:
-                                    pass
+							# now check to see if value changed
+							if x in master_json[block_name]['statements']:
+								if master_json[block_name]['statements'][x]['en'] != t['en']:
+									do_translate = True
 
+								if 'en_tts' in t:
+									if master_json[block_name]['statements'][x]['en_tts'] != t['en_tts']:
+										do_translate = True
 
-                    t_json_data = json.dumps(t_lang_result)
+								if block.is_("character") and 'actor' in t:
+									if master_json[block_name]['statements'][x]['actor'] != t['actor']:
+										do_translate = True
+							else:
+								do_translate = True
 
-                    if not options.FLIGHTTEST:
-                        try:
-                            with open(t_lang_code + '_%s_localized.json'%(block_name), 'w') as of:
-                                of.write(t_json_data)
-                                
-                            if options.OUTPUTDEST:
-                                f = t_lang_code + '_%s_localized.json'%(block_name)
-                                mf = os.path.join(options.OUTPUTDEST, f)
-                                shutil.copy2(f, mf)
-                        except:
-                            pass
+						except:
+							print traceback.format_exc()
+							do_translate = True
 
-            json_data = json.dumps(result)
-            if not options.FLIGHTTEST:
-                try:
-                    with open('master_localized.json', 'w') as of:
-                        of.write(json_data)
-                except:
-                    pass
+						if do_translate:
 
+							print '+ TRANSLATE', x
 
-    # LOCALIZE RECORDS (datagraph, objects)
-    if options.LOCALIZE:
+							if t['en'] != None:
 
-        print 'LOCALIZE STATEMENTS'
+								# translate if needed
+								if translate_service:
 
-        master_data = None
+									for t_lang_code in translate_codes:
 
-        translate_codes = []
-        translate_service = None
-        if options.TRANSLATE:
-            translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
-            for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
-                translate_codes.append(lang_code.strip().lstrip())
+										attempts = 0
+										while attempts < 10:
+											try:
 
-        to_localize = get_localize(lex)
-        to_localize = dict([(_, block,) for _, block in to_localize.items() if block.is_('record')])
+												t_res = translate_service.translations().list(
+													source='en',
+													target=t_lang_code,
+													q=[t['en']]
+												).execute()
 
-        if to_localize:
+												t_txt = t_res['translations'][0]['translatedText']
+												for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+													t_txt = t_txt.replace(k_, v_)
 
-            print '.LOCALIZE', to_localize
+												result[block_name]['statements'][x][t_lang_code] = t_txt
 
-            result = {}
-            master_json = None
-            master_fp = os.path.join(__here__, './master_localized_records.json')
-            master_pfp = os.path.join(__here__, 'master_localized_records.json.bk')
-            if os.path.exists(master_fp):
-                with open(master_fp, 'r') as f:
-                    master_data = f.read()
-                    if master_data:
-                        master_json = json.loads(master_data)
-                        print 'Loaded Master JSON', master_json.keys()
+												attempts = 10 # though break should take care of this
+												time.sleep(.1)
+												break
 
-            for block_name, rd in to_localize.items():
 
-                # block_dir =  os.path.join(__here__, block_name)
-                # try:
-                #     os.makedirs(block_dir)
-                # except:
-                #     pass
+											except:
+												print traceback.format_exc()
+												
+												time.sleep(1)
+												attempts += 1
 
-                if hasattr(rd, 'records'):
+								else:
+									raise Exception('Localizing statements require a translation service running')
 
-                    for x, t in rd.records.items():
+							else:
+								for t_lang_code in translate_codes:
+									result[block_name]['statements'][x][t_lang_code] = None
 
-                        result.setdefault(x, {}).setdefault('en', [])
-                        result[x]['en'].append(t['name'])
-                        result[x]['en'].append(t['origin'])
-                        result[x]['en'].append(t['value'])
-                        result[x]['en'].append(t['description'])
+						else:
 
-                        do_translate = True
+							print '. TRANSLATE', x
 
-                        # try:
+							for t_lang_code in translate_codes:
+								result[block_name]['statements'][x][t_lang_code] = master_json[block_name]['statements'][x][t_lang_code]
 
-                        #     for t_lang_code in translate_codes:
-                        #         if x in master_json[block_name]['statements']:
-                        #             if t_lang_code not in master_json[block_name]['statements'][x]:
-                        #                 do_translate = True
-                        #                 break
-                        #         else:
-                        #             do_translate = True
-                        #             break
 
-                        #     # now check to see if value changed
-                        #     if x in master_json[block_name]['statements']:
-                        #         if master_json[block_name]['statements'][x]['en'] != t['en']:
-                        #             do_translate = True
 
-                        #         if 'en_tts' in t:
-                        #             if master_json[block_name]['statements'][x]['en_tts'] != t['en_tts']:
-                        #                 do_translate = True
-                                        
-                        #     else:
-                        #         do_translate = True
+			if translate_codes and translate_service:
+				# translated, create lang files
 
-                        # except:
-                        #     print traceback.format_exc()
-                        #     do_translate = True
+				if 'en' not in translate_codes:
+					translate_codes.append('en')
 
+				for t_lang_code in translate_codes:
 
+					t_lang_result = {}
 
-                        if do_translate:
+					for k,v in result.items():
 
-                            print '+ TRANSLATE', x
+						if 'statements' in v.keys():
 
-                            # translate if needed
-                            if translate_service:
+							t_lang_result.setdefault(k, {}).setdefault('statements', {})
 
-                                for t_lang_code in translate_codes:
+							if block.is_('character'):
 
-                                    for i in range(0, 3):
-                                        
-                                        attempts = 0
-                                        while attempts < 3:
-                                            try:
+								# add elemnts for character, if set
+								for s_k, s_v in v['statements'].items():
+									try:
+										t_lang_result[k].setdefault('statements', {})[s_k] = {}
+										t_lang_result[k].setdefault('statements', {})[s_k]['text'] = result[k]['statements'][s_k][t_lang_code]
+									except:
+										print 'EXCEPTION. HALTING'
+										print traceback.format_exc()
+										raise
 
-                                                t_res = translate_service.translations().list(
-                                                    source='en',
-                                                    target=t_lang_code,
-                                                    q=[
-                                                        result[x]['en'][i]
-                                                    ]
-                                                ).execute()
+									# try to set actor if its been set
+									try:
+										t_lang_result[k]['statements'][s_k]['actor'] = result[k]['statements'][s_k]['actor']
+									except:
+										pass
 
-                                                result[x].setdefault(t_lang_code, [])
-                                                result[x][t_lang_code].append(t_res['translations'][0]['translatedText'])
+									# try to set audio if its been set
+									try:
+										t_lang_result[k]['statements'][s_k]['audio'] = result[k]['statements'][s_k]['en']['audio']
+									except:
+										pass
 
-                                                attempts = 3
-                                                time.sleep(.1)
-                                                break
+							else:
 
-                                            except:
-                                                print traceback.format_exc()
-                                                
-                                                attempts += 1
-                                                time.sleep(1*attempts)
+								# no additional elements other than the text for each lang
+								for s_k, s_v in v['statements'].items():
+									try:
+										t_lang_result[k].setdefault('statements', {})[s_k] = result[k]['statements'][s_k][t_lang_code]
+									except:
+										print 'EXCEPTION. HALTING'
+										print traceback.format_exc()
+										raise
 
+					t_json_data = json.dumps(t_lang_result)
 
-                                    # now get the description sentences and translate them
-                                    if result[x]['en'][3] != None and len(result[x]['en'][3]) > 0:
+					if not options.FLIGHTTEST:
+						try:
+							with open(t_lang_code + '_%s_localized.json'%(block_name), 'w') as of:
+								of.write(t_json_data)
+								
+							if options.OUTPUTDEST:
+								f = t_lang_code + '_%s_localized.json'%(block_name)
+								mf = os.path.join(options.OUTPUTDEST, f)
+								shutil.copy2(f, mf)
+						except:
+							pass
 
-                                        for line in result[x]['en'][3]:
-                                            if line:
-                                                attempts = 0
-                                                while attempts < 3:
-                                                    try:
+			json_data = json.dumps(result)
+			if not options.FLIGHTTEST:
+				try:
+					with open('master_' + options.OUTPUTFILE, 'w') as of:
+						of.write(json_data)
+				except:
+					pass
 
-                                                        t_res = translate_service.translations().list(
-                                                            source='en',
-                                                            target=t_lang_code,
-                                                            q=line
-                                                        ).execute()
 
-                                                        result[x][t_lang_code].append(t_res['translations'][0]['translatedText'])
+	# LOCALIZE RECORDS (datagraph, objects)
+	if options.LOCALIZE:
 
-                                                        attempts = 3
-                                                        time.sleep(.1)
-                                                        break
+		print 'LOCALIZE STATEMENTS'
 
-                                                    except:
-                                                        print traceback.format_exc()
-                                                        
-                                                        attempts += 1
-                                                        time.sleep(1*attempts)
+		master_data = None
 
-                            else:
-                                raise Exception('Localizing statements require a translation service running')
+		translate_codes = []
+		translate_service = None
+		if options.TRANSLATE:
+			translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
+			for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
+				translate_codes.append(lang_code.strip().lstrip())
 
+		to_localize = get_localize(lex)
+		to_localize = dict([(_, block,) for _, block in to_localize.items() if block.is_('record')])
 
+		if to_localize:
 
-            if translate_codes and translate_service:
-                # translated, create lang files
+			print '.LOCALIZE', to_localize
 
-                if 'en' not in translate_codes:
-                    translate_codes.append('en')
+			result = {}
+			master_json = None
+			# master_fp = os.path.join(__here__, './master_localized_records.json')
+			# master_pfp = os.path.join(__here__, 'master_localized_records.json.bk')
+			master_fp = 'master_' + options.OUTPUTFILE
+			master_pfp = 'master_' + options.OUTPUTFILE + '.bk'
+			if os.path.exists(master_fp):
+				with open(master_fp, 'r') as f:
+					master_data = f.read()
+					if master_data:
+						master_json = json.loads(master_data)
+						print 'Loaded Master JSON', master_json.keys()
 
-                for t_lang_code in translate_codes:
+			for block_name, rd in to_localize.items():
 
-                    t_lang_result = {}
+				# block_dir =  os.path.join(__here__, block_name)
+				# try:
+				#     os.makedirs(block_dir)
+				# except:
+				#     pass
 
-                    for player_data_key, data in result.items():
+				if hasattr(rd, 'records'):
 
-                        t_lang_result[player_data_key] = data[t_lang_code]
+					for x, t in rd.records.items():
 
-                        t_json_data = json.dumps(t_lang_result)
+						print '. KEY', x
 
-                        if not options.FLIGHTTEST:
-                            try:
-                                with open(t_lang_code + '_%s_localized.json'%(block_name), 'w') as of:
-                                    of.write(t_json_data)
-                                if options.OUTPUTDEST:
-                                    f = t_lang_code + '_%s_localized.json'%(block_name)
-                                    mf = os.path.join(options.OUTPUTDEST, f)
-                                    shutil.copy2(f, mf)
-                            except:
-                                pass
+						result.setdefault(x, {}).setdefault('en', [])
+						result[x]['en'].append(t['name'])
+						result[x]['en'].append(t['origin'])
+						result[x]['en'].append(t['value'])
+						result[x]['en'].append(t['description'])
 
+						do_translate = False
 
+						try:
 
-            json_data = json.dumps(result)
-            if not options.FLIGHTTEST:
-                try:
-                    with open('master_datagraph.json', 'w') as of:
-                        of.write(json_data)
-                except:
-                    pass
+							for t_lang_code in translate_codes:
+								if t_lang_code not in master_json[x]:
+									do_translate = True
+									break
 
+							if result[x]['en'] != master_json[x]['en']:
+								do_translate = True
 
-    # LOCALIZE MENU ITEMS
-    if options.LOCALIZE:
+						except:
+							do_translate = True
 
-        master_data = None
+						if do_translate:
 
-        translate_codes = []
-        translate_service = None
-        if options.TRANSLATE:
-            translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
-            for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
-                translate_codes.append(lang_code.strip().lstrip())
+							print '+ TRANSLATE', x
 
-        to_localize = get_localize(lex)
-        to_localize = dict([(_, block,) for _, block in to_localize.items() if block.is_('option')])
+							# translate if needed
+							if translate_service:
 
-        if to_localize:
+								for t_lang_code in translate_codes:
 
-            print '.LOCALIZE', to_localize
+									for i in range(0, 3):
+										
+										attempts = 0
+										while attempts < 10:
+											try:
 
-            result = {}
-            master_json = None
-            master_fp = os.path.join(__here__, './master_' + options.OUTPUTFILE)
-            master_pfp = os.path.join(__here__, './master_' + options.OUTPUTFILE + '.bk')
-            if os.path.exists(master_fp):
-                with open(master_fp, 'r') as f:
-                    master_data = f.read()
-                    if master_data:
-                        master_json = json.loads(master_data)
-                        print 'Loaded Master JSON', master_json.keys()
+												t_res = translate_service.translations().list(
+													source='en',
+													target=t_lang_code,
+													q=[
+														result[x]['en'][i]
+													]
+												).execute()
 
-            for block_name, rd in to_localize.items():
+												t_n = t_res['translations'][0]['translatedText']
+												for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+													t_n = t_n.replace(k_, v_)
 
-                # block_dir =  os.path.join(__here__, block_name)
-                # try:
-                #     os.makedirs(block_dir)
-                # except:
-                #     pass
+												result[x].setdefault(t_lang_code, [])
+												result[x][t_lang_code].append(t_n)
 
-                if hasattr(rd, 'menu_items'):
+												attempts = 10 # though break should take care of this
+												time.sleep(.1)
+												break
 
-                    for t in rd.menu_items:
+											except:
+												print traceback.format_exc()
+												
+												attempts += 1
+												time.sleep(1*attempts)
 
-                        do_translate = True
 
-                        result.setdefault(block_name, {}).setdefault('menu_items', {}).setdefault('en', []).append(t)
+									# now get the description sentences and translate them
+									if result[x]['en'][3] != None and len(result[x]['en'][3]) > 0:
 
+										result[x][t_lang_code].append([])
 
-                        # try:
+										for line in result[x]['en'][3]:
+											if line:
+												attempts = 0
+												while attempts < 10:
+													try:
 
-                        #     for t_lang_code in translate_codes:
-                        #         if x in master_json[block_name]['menu_items']:
-                        #             if t_lang_code not in master_json[block_name]['menu_items'][x]:
-                        #                 do_translate = True
-                        #                 break
-                        #         else:
-                        #             do_translate = True
-                        #             break
+														t_res = translate_service.translations().list(
+															source='en',
+															target=t_lang_code,
+															q=line
+														).execute()
 
-                        #     # now check to see if value changed
-                        #     if x in master_json[block_name]['menu_items']:
-                        #         if master_json[block_name]['menu_items'][x]['en'] != t['en']:
-                        #             do_translate = True
+														t_n = t_res['translations'][0]['translatedText']
+														for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+															t_n = t_n.replace(k_, v_)
 
-                        #         if 'en_tts' in t:
-                        #             if master_json[block_name]['menu_items'][x]['en_tts'] != t['en_tts']:
-                        #                 do_translate = True
-                                        
-                        #     else:
-                        #         do_translate = True
+														result[x][t_lang_code][-1].append(t_n)
 
-                        # except:
-                        #     print traceback.format_exc()
-                        #     do_translate = True
+														attempts = 10 # though break should take care of this
+														time.sleep(.1)
+														break
 
+													except:
+														print traceback.format_exc()
+														
+														attempts += 1
+														time.sleep(1*attempts)
 
+							else:
+								raise Exception('Localizing statements require a translation service running')
 
-                        if do_translate:
+						else:
 
-                            if t != None:
+							print '- TRANSLATE', x
+							try:
+								for t_lang_code in translate_codes:
+									result[x][t_lang_code] = master_json[x][t_lang_code]
+							except:
+								print traceback.format_exc()
 
-                                print '+ TRANSLATE', t['name']
 
-                                # translate if needed
-                                if translate_service:
+							
 
-                                    for t_lang_code in translate_codes:
+			if translate_codes and translate_service:
+				# translated, create lang files
 
-                                        attempts = 0
-                                        while attempts < 3:
-                                            try:
+				if 'en' not in translate_codes:
+					translate_codes.append('en')
 
-                                                n = t['name']
-                                                d = t['description']
+				for t_lang_code in translate_codes:
 
-                                                t_res = translate_service.translations().list(
-                                                    source='en',
-                                                    target=t_lang_code,
-                                                    q=[n,d]
-                                                ).execute()
+					t_lang_result = {}
 
-                                                t_n = t_res['translations'][0]['translatedText']
-                                                d_n = t_res['translations'][1]['translatedText']
+					for player_data_key, data in result.items():
 
-                                                print t_n, d_n
+						t_lang_result[player_data_key] = data[t_lang_code]
 
-                                                result[block_name]['menu_items'].setdefault(t_lang_code, []).append(dict(
-                                                    name=t_n,
-                                                    description=d_n
-                                                    ))
+						t_json_data = json.dumps(t_lang_result)
 
-                                                attempts = 3
-                                                time.sleep(.1)
-                                                break
+						if not options.FLIGHTTEST:
+							try:
+								with open(t_lang_code + '_%s_localized.json'%(block_name), 'w') as of:
+									of.write(t_json_data)
+								if options.OUTPUTDEST:
+									f = t_lang_code + '_%s_localized.json'%(block_name)
+									mf = os.path.join(options.OUTPUTDEST, f)
+									shutil.copy2(f, mf)
+							except:
+								pass
 
-                                            except:
-                                                print traceback.format_exc()
 
-                                                if attempts == 0:
-                                                    time.sleep(60)
-                                                
-                                                time.sleep(1)
-                                                attempts += 1
 
-                                else:
-                                    raise Exception('Localizing statements require a translation service running')
+			json_data = json.dumps(result)
+			if not options.FLIGHTTEST:
+				try:
+					with open('master_' + options.OUTPUTFILE, 'w') as of:
+						of.write(json_data)
+				except:
+					pass
 
-                            else:
-                                for t_lang_code in translate_codes:
-                                    result[block_name]['menu_items'][t_lang_code] = None
 
-                        else:
+	# LOCALIZE MENU ITEMS
+	if options.LOCALIZE:
 
-                            print '. TRANSLATE'
+		master_data = None
 
-                            for t_lang_code in translate_codes:
-                                result[block_name]['menu_items'][t_lang_code] = master_json[block_name]['menu_items'][t_lang_code]
+		translate_codes = []
+		translate_service = None
+		if options.TRANSLATE:
+			translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
+			for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
+				translate_codes.append(lang_code.strip().lstrip())
 
+		to_localize = get_localize(lex)
+		to_localize = dict([(_, block,) for _, block in to_localize.items() if block.is_('option')])
 
+		if to_localize:
 
-            if translate_codes and translate_service:
-                # translated, create lang files
+			print '.LOCALIZE', to_localize
 
-                if 'en' not in translate_codes:
-                    translate_codes.append('en')
+			result = {}
+			master_json = None
+			master_fp = 'master_' + options.OUTPUTFILE
+			master_pfp = 'master_' + options.OUTPUTFILE + '.bk'
+			if os.path.exists(master_fp):
+				with open(master_fp, 'r') as f:
+					master_data = f.read()
+					if master_data:
+						master_json = json.loads(master_data)
+						print 'Loaded Master JSON', master_json.keys()
 
-                for t_lang_code in translate_codes:
+			for block_name, rd in to_localize.items():
 
-                    t_lang_result = {}
+				if hasattr(rd, 'menu_items'):
 
-                    for k,v in result.items():
+					rec_pos = -1
 
-                        if 'menu_items' in v.keys():
-                            t_lang_result.setdefault(k, {}).setdefault('menu_items', [])
+					for t in rd.menu_items:
 
-                            for d in v['menu_items'][t_lang_code]:
-                                try:
-                                    t_lang_result[k].setdefault('menu_items', []).append(d)
-                                except:
-                                    print 'EXCEPTION. HALTING'
-                                    print traceback.format_exc()
-                                    raise
+						rec_pos += 1
 
+						do_translate = False
 
-                    t_json_data = json.dumps(t_lang_result)
+						result.setdefault(block_name, {}).setdefault('menu_items', {}).setdefault('en', []).append(t)
 
-                    if not options.FLIGHTTEST:
-                        try:
-                            with open(t_lang_code + '_' + options.OUTPUTFILE, 'w') as of:
-                                of.write(t_json_data)
+						try:
 
-                            if options.OUTPUTDEST:
-                                f = t_lang_code + '_' + options.OUTPUTFILE
-                                mf = os.path.join(options.OUTPUTDEST, f)
-                                shutil.copy2(f, mf)
+							if master_json[block_name]['menu_items']['en'][rec_pos]['name'] != t['name']:
+								raise Exception('A')
 
-                                print '. COPIED', mf
-                        except:
-                            pass
+							if master_json[block_name]['menu_items']['en'][rec_pos]['description'] != t['description']:
+								raise Exception('B')
 
-            json_data = json.dumps(result)
-            if not options.FLIGHTTEST:
-                try:
-                    with open('master_' + options.OUTPUTFILE, 'w') as of:
-                        of.write(json_data)
+							for t_lang_code in translate_codes:
+								if t_lang_code not in master_json[block_name]['menu_items']:
+									raise Exception('C')
 
-                    # if options.OUTPUTDEST:
-                    #     f = 'en_' + options.OUTPUTFILE
-                    #     mf = os.path.join(options.OUTPUTDEST, f)
-                    #     shutil.copy2(f, mf)
+						except:
+							print traceback.format_exc()
+							do_translate = True
 
-                except:
-                    pass
+						
+						if do_translate or options.FORCE:
 
+							if t != None:
 
-    
-    if options.VERBOSE:
-        print '. STORY OUTPUT'
-        pprint.pprint(story)
+								print '+ TRANSLATE', t['name']
 
-    
-    if story:
+								# translate if needed
+								if translate_service:
 
-        global translate_codes, translate_service
+									for t_lang_code in translate_codes:
 
+										attempts = 0
+										while attempts < 10:
+											try:
 
-        master_json = None
-        try:
-            with open('en_' + options.OUTPUTFILE, 'r') as f:
-                master_data = f.read()
-                if master_data:
-                    master_json = json.loads(master_data)
-                    print 'Loaded Master JSON', master_json.keys()
-        except:
-            print traceback.format_exc()
+												n = t['name']
+												d = t['description']
+												d_ = d
 
+												place_holder_tag = "XXXXREPLACE_THIS_TAGXXXX"
+												tag = None
+												position = 0; # start, middle, end, no tag
 
-        if translate_codes and translate_service:
-            # translated, create lang files
+												if '(' in d and ')' in d:
+													# its a token
+													try:
+														s = d.strip()
+														tag = s[s.index('('):s.index(')')+1]
+														x = s.split(tag)
+														d_ = d.replace(tag, place_holder_tag).strip()
+													except:
+														print traceback.format_exc()
 
-            for t_lang_code in translate_codes:
+												t_res = translate_service.translations().list(
+													source='en',
+													target=t_lang_code,
+													q=[n,d_]
+												).execute()
 
-                t_lang_result = {}
+												t_n = t_res['translations'][0]['translatedText']
+												d_n = t_res['translations'][1]['translatedText']
 
-                if 'main_storyline' in story:
-                    t_lang_result.setdefault('main_storyline', [])
+												# revert back to original if option set
+												if not options.TRANSLATENAME:
+													t_n = t['name']
 
-                    sb_pos = -1
+												if place_holder_tag in d_n and tag:
+													d_n = d_n.replace(place_holder_tag, tag.upper())
 
-                    for sb in story['main_storyline']:
+												for et in EMBEDDED_TRIGGERS:
+													stem = ''
+													if et in d:
 
-                        sb_pos += 1
+														d_n = clean_embedded_triggers(d, et)
 
-                        translate = False
-                        if master_json:
-                            try:
-                                if master_json['main_storyline'][sb_pos]['incoming'] != sb['incoming']:
-                                    raise Exception()
+												d_n = d_n[0].upper() + d_n[1:]
 
-                                if set(master_json['main_storyline'][sb_pos]['responses']) != set(sb['responses']):
-                                    raise Exception()
+												# replace HTML espcaped single quotes
+												for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+													t_n = t_n.replace(k_, v_)
+													d_n = d_n.replace(k_, v_)
 
-                                if 'segue' in sb:
-                                    if master_json['main_storyline'][sb_pos]['segue'] != sb['segue']:
-                                        raise Exception()
-                            except:
-                                translate = True
-                        else:
-                            translate = True
+												result[block_name]['menu_items'].setdefault(t_lang_code, []).append(dict(
+													name=t_n,
+													description=d_n
+													))
 
-                        t_sb = copy.deepcopy(sb)
+												attempts = 10 # though break should take care of this
+												time.sleep(.1)
+												break
 
-                        print '. SHOULD TRANSLATE', translate
+											except:
+												print traceback.format_exc()
 
-                        if translate or True: # force translate for now
+												if attempts == 0:
+													time.sleep(60)
+												
+												time.sleep(1)
+												attempts += 1
 
-                            if 'segue' in sb:
-                                # translate the segue
-                                s_txt = sb['segue']
+								else:
+									raise Exception('Localizing statements require a translation service running')
 
-                                print '.TRANSLATE SEQUE'
+							else:
+								for t_lang_code in translate_codes:
+									result[block_name]['menu_items'][t_lang_code] = None
 
-                                try:
-                                    attempts = 0
-                                    while attempts < 3:
-                                        try:
+						else:
 
-                                            t_res = translate_service.translations().list(
-                                                source='en',
-                                                target=t_lang_code,
-                                                q=[s_txt]
-                                            ).execute()
+							print '. TRANSLATE'
 
-                                            t_sb['segue'] = t_res['translations'][0]['translatedText']
+							for t_lang_code in translate_codes:
+								result[block_name]['menu_items'][t_lang_code] = master_json[block_name]['menu_items'][t_lang_code]
 
-                                            attempts = 3
-                                            time.sleep(.15)
-                                            break
 
-                                        except:
-                                            print traceback.format_exc()
 
-                                            if attempts == 0:
-                                                time.sleep(60)
-                                            
-                                            attempts += 1
-                                            time.sleep(.2*attempts)
-                                except:
-                                    print traceback.format_exc()
+			if translate_codes and translate_service:
+				# translated, create lang files
 
+				if 'en' not in translate_codes:
+					translate_codes.append('en')
 
-                            # translate the incoming
-                            i_txt = sb['incoming']
+				for t_lang_code in translate_codes:
 
-                            print '.TRANSLATE INCOMING', i_txt
+					t_lang_result = {}
 
-                            try:
-                                attempts = 0
-                                while attempts < 3:
-                                    try:
+					for k,v in result.items():
 
-                                        t_res = translate_service.translations().list(
-                                            source='en',
-                                            target=t_lang_code,
-                                            q=[i_txt]
-                                        ).execute()
+						if 'menu_items' in v.keys():
+							t_lang_result.setdefault(k, {}).setdefault('menu_items', [])
 
-                                        t_sb['incoming'] = t_res['translations'][0]['translatedText']
+							for d in v['menu_items'][t_lang_code]:
+								try:
+									t_lang_result[k].setdefault('menu_items', []).append(d)
+								except:
+									print 'EXCEPTION. HALTING'
+									print traceback.format_exc()
+									raise
 
-                                        attempts = 3
-                                        time.sleep(.15)
-                                        break
 
-                                    except:
-                                        print traceback.format_exc()
+					t_json_data = json.dumps(t_lang_result)
 
-                                        if attempts == 0:
-                                            time.sleep(60)
-                                        
-                                        attempts += 1
-                                        time.sleep(.2*attempts)
-                            except:
-                                print traceback.format_exc()
+					if not options.FLIGHTTEST:
+						try:
+							with open(t_lang_code + '_' + options.OUTPUTFILE, 'w') as of:
+								of.write(t_json_data)
 
+							if options.OUTPUTDEST:
+								f = t_lang_code + '_' + options.OUTPUTFILE
+								mf = os.path.join(options.OUTPUTDEST, f)
+								shutil.copy2(f, mf)
 
-                            # translate the response
-                            r_txts = sb['responses']
-                            t_sb['responses'] = []
-                            for r_txt in r_txts:
+								print '. COPIED', mf
+						except:
+							pass
 
-                                print '.TRANSLATE RESPONSE', r_txt
+			json_data = json.dumps(result)
+			if not options.FLIGHTTEST:
+				try:
+					with open('master_' + options.OUTPUTFILE, 'w') as of:
+						of.write(json_data)
 
-                                try:
-                                    attempts = 0
-                                    while attempts < 3:
-                                        try:
+					# if options.OUTPUTDEST:
+					#     f = 'en_' + options.OUTPUTFILE
+					#     mf = os.path.join(options.OUTPUTDEST, f)
+					#     shutil.copy2(f, mf)
 
-                                            t_res = translate_service.translations().list(
-                                                source='en',
-                                                target=t_lang_code,
-                                                q=[r_txt]
-                                            ).execute()
+				except:
+					pass
 
-                                            t_sb['responses'].append(t_res['translations'][0]['translatedText'])
 
-                                            attempts = 3
-                                            time.sleep(.15)
-                                            break
+	
+	if options.VERBOSE:
+		print '. STORY OUTPUT'
+		pprint.pprint(story)
 
-                                        except:
-                                            print traceback.format_exc()
+	
+	if story:
 
-                                            if attempts == 0:
-                                                time.sleep(60)
-                                            
-                                            attempts += 1
-                                            time.sleep(1.2*attempts)
-                                except:
-                                    print traceback.format_exc()
+		global translate_codes, translate_service
 
 
-                        t_lang_result['main_storyline'].append(t_sb)
+		master_json = None
+		try:
+			with open('master_' + options.OUTPUTFILE, 'r') as f:
+				master_data = f.read()
+				if master_data:
+					master_json = json.loads(master_data)
+					print 'Loaded Master JSON', master_json.keys()
+		except:
+			print traceback.format_exc()
+			if not options.FORCE:
+				print 'Exiting....'
+				sys.exit()
 
 
-                if 'dynamic_storyline' in story:
-                    t_lang_result.setdefault('dynamic_storyline', [])
+		result = {}
 
-                    sb_pos = -1
+		if 'en' not in translate_codes:
+			translate_codes.append('en')
 
-                    for sb in story['dynamic_storyline']:
+		if translate_codes and translate_service:
+			# translated, create lang files
 
-                        sb_pos += 1
+			for t_lang_code in translate_codes:
 
-                        translate = False
-                        try:
-                            match = False
-                            for m_sb in master_json['dynamic_storyline']:
-                                if m_sb['player_data_key'] == sb['player_data_key']:
-                                    match = True
-                                    if m_sb['response'] != sb['response']:
-                                        raise Exception()
+				t_lang_result = {}
 
-                                    d_m_sb_pos = -1
-                                    for d_m_sb in m_sb['dynamic_storyline']:
-                                        d_m_sb_pos += 1
-                                        if d_m_sb['incoming'] != sb['dynamic_storyline'][d_m_sb_pos]['incoming']:
-                                            raise Exception()
+				if 'main_storyline' in story:
+					t_lang_result.setdefault('main_storyline', [])
 
-                                        if set(d_m_sb['responses']) != set(sb['dynamic_storyline'][d_m_sb_pos]['responses']):
-                                            raise Exception()
+					sb_pos = -1
 
-                            if not match:
-                                raise
+					for sb in story['main_storyline']:
 
-                        except:
-                            print traceback.format_exc()
-                            translate = True
+						sb_pos += 1
 
-                        print '. SHOULD TRANSLATE DYNAMIC', translate
+						t_sb = copy.deepcopy(sb)
 
+						translate = False
+						try:
+							if master_json:
+								if master_json['en']['main_storyline'][sb_pos]['incoming'] != sb['incoming']:
+									raise Exception("Incoming doesn't match")
 
-                        t_sb = copy.deepcopy(sb)
+								if set(master_json['en']['main_storyline'][sb_pos]['responses']) != set(sb['responses']):
+									raise Exception("Responses don't match")
 
-                        # translate the response
-                        r_txt = t_sb['response']
+								if 'segue' in sb:
+									if master_json['en']['main_storyline'][sb_pos]['segue'] != sb['segue']:
+										raise Exception("Segue doesn't match")
 
-                        try:
-                            attempts = 0
-                            while attempts < 3:
-                                try:
+								t_sb = copy.deepcopy(master_json[t_lang_code]['main_storyline'][sb_pos])
 
-                                    t_res = translate_service.translations().list(
-                                        source='en',
-                                        target=t_lang_code,
-                                        q=[r_txt]
-                                    ).execute()
+							else:
+								raise Exception("No Master File")
+						except:
+							print traceback.format_exc()
+							translate = True
 
-                                    t_sb['response'] = t_res['translations'][0]['translatedText']
+						print '. SHOULD TRANSLATE', translate
 
-                                    attempts = 3
-                                    time.sleep(.15)
-                                    break
+						if t_lang_code != 'en':
+							if translate or options.FORCE:
 
-                                except:
-                                    print traceback.format_exc()
+								if 'segue' in sb:
+									# translate the segue
+									s_txt = sb['segue']
 
-                                    if attempts == 0:
-                                        time.sleep(60)
-                                    
-                                    attempts += 1
-                                    time.sleep(1.2*attempts)
-                        except:
-                            print traceback.format_exc()
+									print '.TRANSLATE SEQUE'
 
+									try:
+										attempts = 0
+										while attempts < 10:
+											try:
 
-                        for dynamic in t_sb['dynamic_storyline']:
+												t_res = translate_service.translations().list(
+													source='en',
+													target=t_lang_code,
+													q=[s_txt]
+												).execute()
 
-                            # translate incoming
-                            i_txt = dynamic['incoming']
+												t_n = t_res['translations'][0]['translatedText']
+												for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+													t_n = t_n.replace(k_, v_)
 
-                            print '.TRANSLATE DYNAMIC INCOMING', i_txt
+												t_sb['segue'] = t_n
 
-                            try:
-                                attempts = 0
-                                while attempts < 3:
-                                    try:
+												attempts = 10 # though break should take care of this
+												time.sleep(.15)
+												break
 
-                                        t_res = translate_service.translations().list(
-                                            source='en',
-                                            target=t_lang_code,
-                                            q=[i_txt]
-                                        ).execute()
+											except:
+												print traceback.format_exc()
 
-                                        dynamic['incoming'] = t_res['translations'][0]['translatedText']
+												if attempts == 0:
+													time.sleep(60)
+												
+												attempts += 1
+												time.sleep(.2*attempts)
+									except:
+										print traceback.format_exc()
 
-                                        attempts = 3
-                                        time.sleep(.15)
-                                        break
 
-                                    except:
-                                        print traceback.format_exc()
+								# translate the incoming
+								i_txt = sb['incoming']
 
-                                        if attempts == 0:
-                                            time.sleep(60)
-                                    
-                                        attempts += 1
-                                        time.sleep(1.2*attempts)
-                            except:
-                                print traceback.format_exc()
+								print '+ TRANSLATE INCOMING', i_txt
 
+								try:
+									attempts = 0
+									while attempts < 10:
+										try:
 
-                            responses = copy.copy(dynamic['responses'])
+											place_holder_tag = "XXXXREPLACE_THIS_TAGXXXX"
+											tag = None
+											position = 0; # start, middle, end, no tag
 
-                            dynamic['responses'] = []
+											if '<' in i_txt and '>' in i_txt:
+												# its a token
+												try:
+													s = i_txt.strip()
+													tag = s[s.index('<'):s.index('>')+1]
+													x = s.split(tag)
+													i_txt = i_txt.replace(tag, place_holder_tag).strip()
+												except:
+													print traceback.format_exc()
 
-                            for r_txt in responses:
+											t_res = translate_service.translations().list(
+												source='en',
+												target=t_lang_code,
+												q=[i_txt]
+											).execute()
 
-                                print '.TRANSLATE RESPONSE OPTION', r_txt
+											t_result = t_res['translations'][0]['translatedText']
+											if tag:
+												t_result = t_result.replace(place_holder_tag, tag)
 
-                                # translate responses
-                                try:
-                                    attempts = 0
-                                    while attempts < 3:
-                                        try:
 
-                                            t_res = translate_service.translations().list(
-                                                source='en',
-                                                target=t_lang_code,
-                                                q=[r_txt]
-                                            ).execute()
+											for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+												t_result = t_result.replace(k_, v_)
 
-                                            dynamic['responses'].append(t_res['translations'][0]['translatedText'])
+											t_sb['incoming'] = t_result
 
-                                            attempts = 3
-                                            time.sleep(.15)
-                                            break
+											attempts = 10 # though break should take care of this
+											time.sleep(.15)
+											break
 
-                                        except:
-                                            print traceback.format_exc()
+										except:
+											print '. T_RESULT', t_result
+											print traceback.format_exc()
 
-                                            if attempts == 0:
-                                                time.sleep(60)
-                                            
-                                            attempts += 1
-                                            time.sleep(1.2*attempts)
-                                except:
-                                    print traceback.format_exc()
+											if attempts == 0:
+												time.sleep(60)
+											
+											attempts += 1
+											time.sleep(.2*attempts)
+								except:
+									print traceback.format_exc()
 
 
-                        t_lang_result['dynamic_storyline'].append(t_sb)
-                        
+								# translate the response
+								r_txts = sb['responses']
+								t_sb['responses'] = []
+								for r_txt in r_txts:
 
-                t_json_data = json.dumps(t_lang_result)
+									print '.TRANSLATE RESPONSE', r_txt
 
-                if options.VERBOSE:
-                    print '. TRANSLATED OUTPUT'
-                    print 
-                    pprint.pprint(t_json_data)
-                    print
+									try:
+										attempts = 0
+										while attempts < 10:
+											try:
 
-                if not options.FLIGHTTEST and options.OUTPUTFILE:
-                    try:
-                        with open(t_lang_code + '_' + options.OUTPUTFILE, 'w') as of:
-                            of.write(t_json_data)
+												t_res = translate_service.translations().list(
+													source='en',
+													target=t_lang_code,
+													q=[r_txt]
+												).execute()
 
-                        if options.OUTPUTDEST:
-                            f = t_lang_code + '_' + options.OUTPUTFILE
-                            mf = os.path.join(options.OUTPUTDEST, f)
-                            shutil.copy2(f, mf)
-                    except:
-                        pass
+												t_txt = t_res['translations'][0]['translatedText']
+												for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+													t_txt = t_txt.replace(k_, v_)
 
+												t_sb['responses'].append(t_txt)
 
-        # dump the story
-        djson = json.dumps(story)
+												attempts = 10 # though break should take care of this
+												time.sleep(.15)
+												break
 
-        if not options.FLIGHTTEST and options.OUTPUTFILE:
-            try:
-                with open('en_' + options.OUTPUTFILE, 'w') as of:
-                    of.write(djson)
+											except:
+												print traceback.format_exc()
 
-                if options.OUTPUTDEST:
-                    f = 'en_' + options.OUTPUTFILE
-                    mf = os.path.join(options.OUTPUTDEST, f)
-                    shutil.copy2(f, mf)
-            except:
-                pass
+												if attempts == 0:
+													time.sleep(60)
+												
+												attempts += 1
+												time.sleep(1.2*attempts)
+									except:
+										print traceback.format_exc()
 
 
-    return True
-    
-    
+						t_lang_result['main_storyline'].append(t_sb)
+
+
+				if 'dynamic_storyline' in story:
+					t_lang_result.setdefault('dynamic_storyline', [])
+
+					sb_pos = -1
+
+					for sb in story['dynamic_storyline']:
+
+						sb_pos += 1
+
+						t_sb = copy.deepcopy(sb)
+
+						translate = False
+						try:
+							match = False
+							for m_sb in master_json["en"]['dynamic_storyline']:
+
+								# t_sb = copy.deepcopy(m_sb)
+
+								if m_sb['player_data_key'] == sb['player_data_key']:
+									match = True
+									if m_sb['response'] != sb['response']:
+										raise Exception("Dynamic repsones doesn't match")
+
+									d_m_sb_pos = -1
+									for d_m_sb in m_sb['dynamic_storyline']:
+										d_m_sb_pos += 1
+										if d_m_sb['incoming'] != sb['dynamic_storyline'][d_m_sb_pos]['incoming']:
+											raise Exception("Dynamic incoming doesn't match")
+
+										if set(d_m_sb['responses']) != set(sb['dynamic_storyline'][d_m_sb_pos]['responses']):
+											raise Exception("Dynamic responses doesn't match")
+
+							if not match:
+								raise Exception("No Match")
+
+						except:
+							print 'EXCEPTION HERE', traceback.format_exc()
+							translate = True
+
+						print '. SHOULD TRANSLATE DYNAMIC', translate, sb['player_data_key']
+
+						if t_lang_code != 'en':
+
+							if translate or options.FORCE:
+
+								# translate the response
+								r_txt = t_sb['response']
+
+								try:
+									attempts = 0
+									while attempts < 10:
+										try:
+
+											t_res = translate_service.translations().list(
+												source='en',
+												target=t_lang_code,
+												q=[r_txt]
+											).execute()
+
+											t_txt = t_res['translations'][0]['translatedText']
+											for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+												t_txt = t_txt.replace(k_, v_)
+											t_sb['response'] = t_txt
+
+											attempts = 10 # though break should take care of this
+											time.sleep(.15)
+											break
+
+										except:
+											print traceback.format_exc()
+
+											if attempts == 0:
+												time.sleep(60)
+											
+											attempts += 1
+											time.sleep(1.2*attempts)
+								except:
+									print traceback.format_exc()
+
+
+								for dynamic in t_sb['dynamic_storyline']:
+
+									# translate incoming
+									i_txt = dynamic['incoming']
+
+									print '.TRANSLATE DYNAMIC INCOMING', i_txt
+
+									try:
+										attempts = 0
+										while attempts < 10:
+											try:
+
+												t_res = translate_service.translations().list(
+													source='en',
+													target=t_lang_code,
+													q=[i_txt]
+												).execute()
+
+												t_txt = t_res['translations'][0]['translatedText']
+												for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+													t_txt = t_txt.replace(k_, v_)
+
+												dynamic['incoming'] = t_txt
+
+												attempts = 10 # though break should take care of this
+												time.sleep(.15)
+												break
+
+											except:
+												print traceback.format_exc()
+
+												if attempts == 0:
+													time.sleep(60)
+											
+												attempts += 1
+												time.sleep(1.2*attempts)
+									except:
+										print traceback.format_exc()
+
+									responses = dict()
+
+									try:
+										responses = copy.copy(dynamic['responses'])
+									except:
+										print traceback.format_exc()
+										print str(t_sb)
+										print
+										sys.exit()
+
+									dynamic['responses'] = []
+
+									for r_txt in responses:
+
+										print '.TRANSLATE RESPONSE OPTION', r_txt
+
+										# translate responses
+										try:
+											attempts = 0
+											while attempts < 10:
+												try:
+
+													t_res = translate_service.translations().list(
+														source='en',
+														target=t_lang_code,
+														q=[r_txt]
+													).execute()
+
+													t_txt = t_res['translations'][0]['translatedText']
+													for k_,v_ in TRANSLATED_HTML_ESCAPES.items():
+														t_txt = t_txt.replace(k_, v_)
+
+													dynamic['responses'].append(t_txt)
+
+													attempts = 10 # though break should take care of this
+													time.sleep(.15)
+													break
+
+												except:
+													print traceback.format_exc()
+
+													if attempts == 0:
+														time.sleep(60)
+													
+													attempts += 1
+													time.sleep(1.2*attempts)
+										except:
+											print traceback.format_exc()
+
+						t_lang_result['dynamic_storyline'].append(t_sb)
+						
+
+				t_json_data = json.dumps(t_lang_result)
+
+				result[t_lang_code] = t_lang_result
+
+				if options.VERBOSE:
+					print '. TRANSLATED OUTPUT'
+					print 
+					pprint.pprint(t_json_data)
+					print
+
+				if not options.FLIGHTTEST and options.OUTPUTFILE:
+					try:
+						with open(t_lang_code + '_' + options.OUTPUTFILE, 'w') as of:
+							of.write(t_json_data)
+
+						if options.OUTPUTDEST:
+							f = t_lang_code + '_' + options.OUTPUTFILE
+							mf = os.path.join(options.OUTPUTDEST, f)
+							shutil.copy2(f, mf)
+					except:
+						pass
+
+
+		# dump the story
+		# djson = json.dumps(story)
+		djson = json.dumps(result)
+
+		if not options.FLIGHTTEST and options.OUTPUTFILE:
+			try:
+				with open('master_' + options.OUTPUTFILE, 'w') as of:
+					of.write(djson)
+
+				if options.OUTPUTDEST:
+					f = 'master_' + options.OUTPUTFILE
+					mf = os.path.join(options.OUTPUTDEST, f)
+					shutil.copy2(f, mf)
+			except:
+				pass
+
+
+	return True
+	
+	
 def parseArgs(args=None):
-    
 
-    # python dialogc.py -d robotdialog.yaml --robot-voice-gen --only-en-rvg --translate [fr,es,it,ca,de,ja,zh-CN] --google-api-key YOUR_API_KEY --cereproc-api-key YOUR_CEREPROC_API_KEY --cereproc-api-psswrd YOUR_CEREPROC_PSSWRD --output-dest ../Assets/Resources/JSON
-    # python dialogc.py -d acuity.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN] --google-api-key YOUR_API_KEY --output-dest ../Assets/Resources/JSON
-    # python dialogc.py -d datagraph.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN] --google-api-key YOUR_API_KEY
-    # python dialogc.py -d computer_options.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN] --google-api-key YOUR_API_KEY -o ComputerInterfaceOptions.json --output-dest ../Assets/Resources/JSON
-    # python dialogc.py -d dialog.yaml --include-dyn --include-main --localize --translate [fr,es,it,ca,de,ja,zh-CN] --google-api-key YOUR_API_KEY -o ComputerInterfaceDialog.json --output-dest ../Assets/Resources/JSON
+	# translate_api_key_1 AIzaSyD6VFxzb0EAjzX4iUrW2GFv5BX8147n-ec
 
+	# python dialogc.py -d robotdialog.yaml --robot-voice-gen --only-en-rvg --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E --cereproc-api-key 5669b86be50d7 --cereproc-api-psswrd r9gTHn6cZa --output-dest ../Assets/Resources/JSON
+	# python dialogc.py -d acuity.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E -o Acuity.json --output-dest ../Assets/Resources/JSON
+	# python dialogc.py -d characterdialog.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E -o InteractiveCharacterDialog.yaml --output-dest ../Assets/Resources/JSON
+	# python dialogc.py -d datagraph.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E -o DatagraphObjects.json --output-dest ../Assets/Resources/JSON
+	# python dialogc.py -d computer_options.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E -o ComputerInterfaceOptions.json --output-dest ../Assets/Resources/JSON
+	# python dialogc.py -d dialog.yaml --include-dyn --include-main --localize --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E -o ComputerInterfaceDialogue.json --output-dest ../Assets/Resources/JSON
+	# python dialogc.py -d uielements.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E -o UIElements.json --output-dest ../Assets/Resources/JSON
+	
+	# python dialogc.py -d test_datagraph2.yaml --localize --translate [fr,es,it,ca,de,ja,zh-CN] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E
+	# python dialogc.py -d test_uielements.yaml --localize --translate [fr] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E
+	# python dialogc.py -d test_computer_options.yaml --localize --translate [fr] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E -o ComputerInterfaceOptions.json
+	# python dialogc.py -d test_robotdialog.yaml --robot-voice-gen --only-en-rvg --translate [fr,es,it,ca,de,ja,zh-CN,ru,ko] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E --cereproc-api-key 5669b86be50d7 --cereproc-api-psswrd r9gTHn6cZa --output-dest ../Assets/Resources/JSON
 
-    parser = OptionParser()
+	# python dialogc.py -d dialog.yaml --include-vox --translate [fr,es,it,ca,de,ja,zh-CN] --google-api-key AIzaSyDRr-K3lO_m_Dp0V7agzNRx5Snq6Grio7E
+	# [Q8DrillingSafetyBot,GameHostBot,MainQuartersRobot,ProcessingSafetyBot,Q8MillingSafetyBot,HibernationRobot,CentralAI,Q8ProcessingSafetyBot,MillingSafetyBot,DrillingSafetyBot,LabSecurityBot,LabCompanionBot]
+	# [Q8DrillingSafetyBot,GameHostBot,MainQuartersRobot,ProcessingSafetyBot,Q8MillingSafetyBot,HibernationRobot,Q8ProcessingSafetyBot,MillingSafetyBot,DrillingSafetyBot,LabSecurityBot,LabCompanionBot]
 
-    parser.add_option("-d", dest="DIALOGFILE", help="Dialog file")
-    parser.add_option("-o", dest="OUTPUTFILE", help="Output file")
-    parser.add_option("-s", dest="SCRIPTOUTPUTFILE", help="Script Output file")
-    parser.add_option("-v", action="store_true", default=False, dest="VERBOSE", help="Verbose")
-    parser.add_option("--print-footer", action="store_true", default=False, dest="PRINTFOOTER", help="Print Footer")
-    parser.add_option("--include-main", action="store_true", default=False, dest="INCLUDEMAIN", help="Include main conversation")
-    parser.add_option("--include-dyn", action="store_true", default=False, dest="INCLUDEDYN", help="Include all dynamic conversations")
-    parser.add_option("--include-aux", action="store_true", default=False, dest="INCLUDEAUX", help="Include all auxilary, supporting text")
-    parser.add_option("--include-vox", action="store_true", default=False, dest="INCLUDEVOX", help="Include spoken dialog")
-    parser.add_option("--output-x-character", action="store_true", default=False, dest="OUTPUTXCHAR", help="Output script files for each character")
-    parser.add_option("--robot-voice-gen", action="store_true", default=False, dest="ROBOTVOICEGEN", help="Output Robot Voice Files")
-    parser.add_option("--only-en-rvg", action="store_true", default=False, dest="ONLYENROBOTVOICEGEN", help="Only Output Robot Voice Files in English")
-    parser.add_option("--google-api-key", dest="GOOGLEAPIKEY", help="Google API Key")
-    parser.add_option("--cereproc-api-key", dest="CEREPROCAPIKEY", help="Cere Proc API Key")
-    parser.add_option("--cereproc-api-psswrd", dest="CEREPROCAPIPSSWRD", help="Cere Proc API Password")
-    parser.add_option("--translate", dest="TRANSLATE", help="Languages to Translate")
-    parser.add_option("--localize", action="store_true", default=False, dest="LOCALIZE", help="Translate LOCALIZE formatted DialogC blocks")
-    parser.add_option("--only-blocks", dest="ONLYBLOCKS", help="Process Only These Blocks")
-    parser.add_option("--ignore-blocks", dest="IGNOREBLOCKS", help="Ignore Only These Blocks")
-    parser.add_option("--regen-blocks", dest="REGENBLOCKS", help="Regenerate These Blocks")
-    parser.add_option("--regen-block-categories", dest="REGENBLOCKCATS", help="Regenerate These Block Categories")
-    parser.add_option("--only-pdks", dest="ONLYPDKS", help="Process Only These Player Data Keys")
-    parser.add_option("--ogg-to-wav", action="store_true", default=True, dest="OGGTOWAV", help="Convert Oggs to Wavs")
-    parser.add_option("--wav-to-ogg", action="store_true", default=False, dest="WAVTOOGG", help="Convert Wavs to Ogg")
-    parser.add_option("--flighttest", action="store_true", default=False, dest="FLIGHTTEST", help="Run a Flight Test")
-    parser.add_option("--output-dest", dest="OUTPUTDEST", help="Move output file to dest")
+	parser = OptionParser()
 
-    (options, args) = parser.parse_args()
-    
-    if options != None:
-        return options
-        
-        
+	parser.add_option("-d", dest="DIALOGFILE", help="Dialog file")
+	parser.add_option("-o", dest="OUTPUTFILE", help="Output file")
+	parser.add_option("-s", dest="SCRIPTOUTPUTFILE", help="Script Output file")
+	parser.add_option("-v", action="store_true", default=False, dest="VERBOSE", help="Verbose")
+	parser.add_option("--print-footer", action="store_true", default=False, dest="PRINTFOOTER", help="Print Footer")
+	parser.add_option("--include-main", action="store_true", default=False, dest="INCLUDEMAIN", help="Include main conversation")
+	parser.add_option("--include-dyn", action="store_true", default=False, dest="INCLUDEDYN", help="Include all dynamic conversations")
+	parser.add_option("--include-aux", action="store_true", default=False, dest="INCLUDEAUX", help="Include all auxilary, supporting text")
+	parser.add_option("--include-vox", action="store_true", default=False, dest="INCLUDEVOX", help="Include spoken dialog")
+	parser.add_option("--output-x-character", action="store_true", default=False, dest="OUTPUTXCHAR", help="Output script files for each character")
+	parser.add_option("--robot-voice-gen", action="store_true", default=False, dest="ROBOTVOICEGEN", help="Output Robot Voice Files")
+	parser.add_option("--only-en-rvg", action="store_true", default=False, dest="ONLYENROBOTVOICEGEN", help="Only Output Robot Voice Files in English")
+	parser.add_option("--google-api-key", dest="GOOGLEAPIKEY", help="Google API Key")
+	parser.add_option("--cereproc-api-key", dest="CEREPROCAPIKEY", help="Cere Proc API Key")
+	parser.add_option("--cereproc-api-psswrd", dest="CEREPROCAPIPSSWRD", help="Cere Proc API Password")
+	parser.add_option("--translate", dest="TRANSLATE", help="Languages to Translate")
+	parser.add_option("--localize", action="store_true", default=False, dest="LOCALIZE", help="Translate LOCALIZE formatted DialogC blocks")
+	parser.add_option("--localize-names", action="store_false", default=True, dest="TRANSLATENAME", help="Translate Item Names")
+	parser.add_option("--only-blocks", dest="ONLYBLOCKS", help="Process Only These Blocks")
+	parser.add_option("--ignore-blocks", dest="IGNOREBLOCKS", help="Ignore Only These Blocks")
+	parser.add_option("--regen-blocks", dest="REGENBLOCKS", help="Regenerate These Blocks")
+	parser.add_option("--regen-block-categories", dest="REGENBLOCKCATS", help="Regenerate These Block Categories")
+	parser.add_option("--only-pdks", dest="ONLYPDKS", help="Process Only These Player Data Keys")
+	parser.add_option("--ogg-to-wav", action="store_true", default=True, dest="OGGTOWAV", help="Convert Oggs to Wavs")
+	parser.add_option("--wav-to-ogg", action="store_true", default=False, dest="WAVTOOGG", help="Convert Wavs to Ogg")
+	parser.add_option("--flighttest", action="store_true", default=False, dest="FLIGHTTEST", help="Run a Flight Test")
+	parser.add_option("--output-dest", dest="OUTPUTDEST", help="Move output file to dest")
+	parser.add_option("--force", action="store_true", default=False, dest="FORCE", help="Force overwrite if no master")
+
+	(options, args) = parser.parse_args()
+	
+	if options != None:
+		return options
+		
+		
 if __name__ == '__main__':
 
-    print 'starting dialogc'
+	print 'starting dialogc'
 
-    options = parseArgs()
+	options = parseArgs()
 
-    only_blocks = []
-    ignore_blocks = []
-    regen_block_categories = []
-    translate_codes = []
-    translate_service = None
+	only_blocks = []
+	ignore_blocks = []
+	regen_block_categories = []
+	translate_codes = []
+	translate_service = None
 
 
-    if options.TRANSLATE:
-        translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
-        for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
-            translate_codes.append(lang_code.strip().lstrip())
+	if options.TRANSLATE:
+		translate_service = build('translate', 'v2', developerKey=options.GOOGLEAPIKEY)
+		for lang_code in options.TRANSLATE.lstrip('[').strip(']').split(','):
+			translate_codes.append(lang_code.strip().lstrip())
 
-    if options.ONLYBLOCKS:
-        for x in options.ONLYBLOCKS.lstrip('[').strip(']').split(','):
-            only_blocks.append(x.strip().lstrip())
+	if options.ONLYBLOCKS:
+		for x in options.ONLYBLOCKS.lstrip('[').strip(']').split(','):
+			only_blocks.append(x.strip().lstrip())
 
-    if options.IGNOREBLOCKS:
-        for x_ in options.IGNOREBLOCKS.lstrip('[').strip(']').split(','):
-            ignore_blocks.append(x_.strip().lstrip())
+	if options.IGNOREBLOCKS:
+		for x_ in options.IGNOREBLOCKS.lstrip('[').strip(']').split(','):
+			ignore_blocks.append(x_.strip().lstrip())
 
-    if options.REGENBLOCKCATS:
-        for x_ in options.REGENBLOCKCATS.lstrip('[').strip(']').split(','):
-            regen_block_categories.append(x_.strip().lstrip())
+	if options.REGENBLOCKCATS:
+		for x_ in options.REGENBLOCKCATS.lstrip('[').strip(']').split(','):
+			regen_block_categories.append(x_.strip().lstrip())
 
-    r = doit()
-    
-    print 'done'
+	r = doit()
+	
+	print 'done'
 
    
-    
-    
-    
-    
+	
+	
+	
+	

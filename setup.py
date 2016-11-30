@@ -14,7 +14,7 @@ with open('requirements.txt') as f:
 requires = [r for r in requires if r and r.startswith("#")==False and r.startswith("-e")==False]
 
 setup(name='DialogC',
-      version='0.1,
+      version='0.5,
       description='DialogC',
       long_description=README + '\n\n' + CHANGES,
       classifiers=[
